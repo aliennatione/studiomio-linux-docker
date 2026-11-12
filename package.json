@@ -22,7 +22,8 @@
     "app": "npm run build && npm run electron:build && electron .",
     "dist": "npm run build && npm run electron:build && electron-builder --win --publish never",
     "preversion": "node scripts/changelog.mjs check",
-    "version": "node scripts/changelog.mjs release && git add CHANGELOG.md"
+    "version": "node scripts/changelog.mjs release && git add CHANGELOG.md",
+    "remote": "node scripts/remote-server.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
