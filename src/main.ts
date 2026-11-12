@@ -25,9 +25,16 @@ if (token) {
         try {
           const c = JSON.parse(j.command);
           if (c.action === 'reload') location.reload();
-          else if (c.action === 'setVolume' && typeof c.value === 'number') {
-            const audio = (window as any).studiomio?.audio;
-            if (audio) audio.masterGain = c.value;
+          else if (c.action === 'invoke' && typeof c.method === 'string') {
+            const app = (window as any).studiomio;
+            const fn = app?.[c.method];
+            if (typeof fn === 'function') fn(...(c.args || []));
+          } else if (c.action === 'set' && typeof c.path === 'string') {
+            const app = (window as any).studiomio;
+            const parts = c.path.split('.');
+            let o = app;
+            for (let i=0;i<parts.length-1;i++) o = o?.[parts[i]];
+            if (o) o[parts[parts.length-1]] = c.value;
           } else {
             console.log('remote command:', c);
           }
