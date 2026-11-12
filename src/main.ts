@@ -13,3 +13,15 @@ const app = new App(document.getElementById('app')!);
 // in development the app is reachable from the console (and from the automated checks); in the
 // installed app only the controllers, for diagnosis from F12: copy(studiomio.surfaces.report())
 Object.assign(window, { studiomio: import.meta.env.DEV ? app : { surfaces: app.surfaces } });
+
+// Remote control polling (best-effort; ignored if no token)
+const token = (import.meta as any).env?.VITE_REMOTE_TOKEN;
+if (token) {
+  setInterval(async () => {
+    try {
+      const r = await fetch('/pending', { headers: { Authorization: `Bearer ${token}` } });
+      const j = await r.json();
+      if (j.command) console.log('remote command:', j.command);
+    } catch {}
+  }, 3000);
+}

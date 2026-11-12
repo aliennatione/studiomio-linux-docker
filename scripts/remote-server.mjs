@@ -6,6 +6,7 @@ const PORT = process.env.PORT || 8080;
 const TOKEN = process.env.REMOTE_TOKEN || '';
 const ALLOW = (process.env.ALLOW_ORIGINS || '*').split(',').map(s=>s.trim()).filter(Boolean);
 const STATIC_DIR = process.env.STATIC_DIR || path.join(process.cwd(), 'dist');
+let pending = null;
 
 function send(res, code, body, type='text/plain') {
   res.statusCode = code;
@@ -34,9 +35,19 @@ const server = http.createServer((req,res)=>{
     const auth = req.headers.authorization || '';
     if (!TOKEN || auth !== `Bearer ${TOKEN}`) { res.statusCode=401; res.end('unauthorized'); return; }
     let body=''; req.on('data',d=>body+=d); req.on('end',()=>{
-      res.setHeader('Content-Type','application/json');
-      res.end(JSON.stringify({received:body}));
+      pending = body;
+    res.setHeader('Content-Type','application/json');
+      res.end(JSON.stringify({received:body, queued:true}));
     });
+    return;
+  }
+
+  if (req.url === '/pending' && req.method === 'GET') {
+    const auth = req.headers.authorization || '';
+    if (!TOKEN || auth !== `Bearer ${TOKEN}`) { res.statusCode=401; res.end('unauthorized'); return; }
+    res.setHeader('Content-Type','application/json');
+    const out = pending; pending = null;
+    res.end(JSON.stringify({command: out}));
     return;
   }
 
