@@ -43,3 +43,11 @@ if (token) {
     } catch {}
   }, 3000);
 }
+
+// Expose control inventory for API parity
+try {
+  const app = (window as any).studiomio;
+  if (app && !app.controls) {
+    app.controls = () => Object.keys(app).filter(k => typeof app[k] === 'function' || typeof app[k] !== 'undefined');
+  }
+} catch {}

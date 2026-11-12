@@ -51,6 +51,12 @@ const server = http.createServer((req,res)=>{
     return;
   }
 
+  if (req.url === '/controls') {
+    res.setHeader('Content-Type','application/json');
+    res.end(JSON.stringify({note:'use invoke/set with names from app.controls()'}));
+    return;
+  }
+
   // static files
   let filePath = path.join(STATIC_DIR, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
