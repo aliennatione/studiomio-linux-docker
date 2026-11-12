@@ -1,11 +1,22 @@
 import http from 'node:http';
-const PORT = process.env.PORT || 8787;
+import fs from 'node:fs';
+import path from 'node:path';
+
+const PORT = process.env.PORT || 8080;
 const TOKEN = process.env.REMOTE_TOKEN || '';
-const ALLOW = (process.env.ALLOW_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean);
+const ALLOW = (process.env.ALLOW_ORIGINS || '*').split(',').map(s=>s.trim()).filter(Boolean);
+const STATIC_DIR = process.env.STATIC_DIR || path.join(process.cwd(), 'dist');
+
+function send(res, code, body, type='text/plain') {
+  res.statusCode = code;
+  res.setHeader('Content-Type', type);
+  res.end(body);
+}
+
 const server = http.createServer((req,res)=>{
   const origin = req.headers.origin || '';
-  if (ALLOW.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  if (ALLOW.includes('*') || ALLOW.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Vary','Origin');
   }
   res.setHeader('Access-Control-Allow-Headers','Authorization, Content-Type');
@@ -13,9 +24,10 @@ const server = http.createServer((req,res)=>{
   res.setHeader('Cross-Origin-Opener-Policy','same-origin');
   res.setHeader('Cross-Origin-Embedder-Policy','require-corp');
   if (req.method === 'OPTIONS') { res.statusCode=204; res.end(); return; }
+
   if (req.url === '/status') {
     res.setHeader('Content-Type','application/json');
-    res.end(JSON.stringify({ok:true, version:process.env.npm_package_version}));
+    res.end(JSON.stringify({ok:true}));
     return;
   }
   if (req.url === '/command' && req.method === 'POST') {
@@ -27,6 +39,19 @@ const server = http.createServer((req,res)=>{
     });
     return;
   }
-  res.statusCode=404; res.end('not found');
+
+  // static files
+  let filePath = path.join(STATIC_DIR, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(STATIC_DIR, 'index.html');
+  }
+  const ext = path.extname(filePath);
+  const types = {'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};
+  fs.readFile(filePath, (err,data)=>{
+    if (err) { res.statusCode=404; res.end('not found'); return; }
+    res.setHeader('Content-Type', types[ext] || 'application/octet-stream');
+    res.end(data);
+  });
 });
-server.listen(PORT, ()=>console.log(`remote control listening on ${PORT}`));
+
+server.listen(PORT, ()=>console.log(`studiomio listening on ${PORT}`));
