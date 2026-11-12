@@ -17,6 +17,7 @@ Object.assign(window, { studiomio: import.meta.env.DEV ? app : { surfaces: app.s
 // Remote control polling (best-effort; ignored if no token)
 const token = (import.meta as any).env?.VITE_REMOTE_TOKEN;
 if (token) {
+  const bpm = 120; const intervalMs = (4 * 60000) / bpm;
   setInterval(async () => {
     try {
       const r = await fetch('/pending', { headers: { Authorization: `Bearer ${token}` } });
@@ -41,7 +42,7 @@ if (token) {
         } catch (e) { console.warn('bad command', e); }
       }
     } catch {}
-  }, 3000);
+  }, intervalMs);
 }
 
 // Expose control inventory for API parity
