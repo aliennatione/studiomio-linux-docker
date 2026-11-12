@@ -21,7 +21,18 @@ if (token) {
     try {
       const r = await fetch('/pending', { headers: { Authorization: `Bearer ${token}` } });
       const j = await r.json();
-      if (j.command) console.log('remote command:', j.command);
+      if (j.command) {
+        try {
+          const c = JSON.parse(j.command);
+          if (c.action === 'reload') location.reload();
+          else if (c.action === 'setVolume' && typeof c.value === 'number') {
+            const audio = (window as any).studiomio?.audio;
+            if (audio) audio.masterGain = c.value;
+          } else {
+            console.log('remote command:', c);
+          }
+        } catch (e) { console.warn('bad command', e); }
+      }
     } catch {}
   }, 3000);
 }
