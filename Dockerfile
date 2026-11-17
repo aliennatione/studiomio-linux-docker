@@ -1,4 +1,6 @@
 FROM node:22-alpine AS build
+ARG VITE_REMOTE_TOKEN
+ENV VITE_REMOTE_TOKEN=$VITE_REMOTE_TOKEN
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci

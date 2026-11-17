@@ -9,6 +9,7 @@ await Promise.all([
 ]);
 
 const app = new App(document.getElementById('app')!);
+import('./remote/command-registry').then(m => { try { m.registerCommands(app); } catch (e) { console.warn('remote registry', e); } }).catch(() => {});
 
 // in development the app is reachable from the console (and from the automated checks); in the
 // installed app only the controllers, for diagnosis from F12: copy(studiomio.surfaces.report())
@@ -36,6 +37,11 @@ if (token) {
             let o = app;
             for (let i=0;i<parts.length-1;i++) o = o?.[parts[i]];
             if (o) o[parts[parts.length-1]] = c.value;
+          } else if (c.action === 'command' && typeof c.name === 'string') {
+            const app = (window as any).studiomio;
+            const fn = app?.commands?.[c.name] || app?.[c.name];
+            if (typeof fn === 'function') fn(...(c.args || []));
+            else console.warn('unknown command', c.name);
           } else {
             console.log('remote command:', c);
           }
