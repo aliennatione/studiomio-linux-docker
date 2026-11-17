@@ -9,8 +9,10 @@ await Promise.all([
 ]);
 
 const app = new App(document.getElementById('app')!);
-import('./remote/edit-commands').then(m => { try { m.registerEditCommands(app); console.log('remote edit commands registered'); } catch (e) { console.warn('edit registry', e); } }).catch(e => console.warn('edit registry import failed', e));
-import('./remote/command-registry').then(m => { try { m.registerCommands(app); } catch (e) { console.warn('remote registry', e); } }).catch(() => {});
+import { registerEditCommands } from './remote/edit-commands';
+registerEditCommands(app);
+import { registerCommands } from './remote/command-registry';
+registerCommands(app);
 
 // in development the app is reachable from the console (and from the automated checks); in the
 // installed app only the controllers, for diagnosis from F12: copy(studiomio.surfaces.report())
