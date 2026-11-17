@@ -1,5 +1,7 @@
 # studiomio
 
+> Based on [davvoz/studiomio](https://github.com/davvoz/studiomio) (MIT license). This is an independent variant with Linux/Docker, offline PWA and remote control.
+
 A DAW in the browser (and in Electron) modelled on Ableton Live: arrangement and session view, audio
 clips with warp, MIDI clips, clip modulations, instruments and effects in AudioWorklet, racks with
 macros, MIDI controllers. TypeScript; the warp engine comes from [WarpMio](../warpmio).
