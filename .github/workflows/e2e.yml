@@ -11,9 +11,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
-      - run: npm run wasm 2>/dev/null || true
       - run: npx playwright install --with-deps chromium
+      - run: npm run wasm 2>/dev/null || true
       - run: npx vite build
+        env:
+          VITE_REMOTE_TOKEN: secret123
       - run: |
           REMOTE_TOKEN=secret123 PORT=8080 STATIC_DIR=./dist node scripts/remote-server.mjs &
           sleep 3
