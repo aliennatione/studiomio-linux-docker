@@ -20,7 +20,7 @@ export function registerCommands(app: any) {
   const commands = enumerate(app);
   app.commands = commands;
 
-  const token = (import.meta as any).env?.VITE_REMOTE_TOKEN;
+  const token = import.meta.env.VITE_REMOTE_TOKEN;
   if (token) {
     fetch('/register', {
       method: 'POST',

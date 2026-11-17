@@ -17,7 +17,7 @@ import('./remote/command-registry').then(m => { try { m.registerCommands(app); }
 Object.assign(window, { studiomio: import.meta.env.DEV ? app : { surfaces: app.surfaces } });
 
 // Remote control polling (best-effort; ignored if no token)
-const token = (import.meta as any).env?.VITE_REMOTE_TOKEN;
+const token = import.meta.env.VITE_REMOTE_TOKEN;
 if (token) {
   const bpm = 120; const intervalMs = (4 * 60000) / bpm;
   setInterval(async () => {

@@ -12,7 +12,7 @@ export function registerEditCommands(app: any) {
   commands['transport.stop'] = () => app.audio?.engine?.stop?.();
 
   // register schema
-  const token = (import.meta as any).env?.VITE_REMOTE_TOKEN;
+  const token = import.meta.env.VITE_REMOTE_TOKEN;
   if (token) {
     fetch('/register', {
       method: 'POST',
