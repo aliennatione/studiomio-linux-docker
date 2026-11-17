@@ -1,6 +1,7 @@
 import * as edits from '../store/edits';
 
 export function registerEditCommands(app: any) {
+  console.log('registerEditCommands called');
   const store = app.store;
   const commands: Record<string, (...args: any[]) => any> = app.commands || (app.commands = {});
   for (const [name, fn] of Object.entries(edits)) {
