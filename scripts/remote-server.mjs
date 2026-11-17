@@ -14,6 +14,18 @@ function send(res, code, body, type='text/plain') {
   res.end(body);
 }
 
+const openapi = {
+  openapi: '3.0.3',
+  info: { title: 'studiomio remote control', version: '1' },
+  paths: {
+    '/status': { get: { summary: 'status', responses: { '200': { description: 'ok' } } } },
+    '/command': { post: { summary: 'queue command', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'queued' }, '401': { description: 'unauthorized' } } } },
+    '/pending': { get: { summary: 'consume pending command', security: [{ bearerAuth: [] }], responses: { '200': { description: 'command' }, '401': { description: 'unauthorized' } } } },
+    '/controls': { get: { summary: 'control inventory hint', responses: { '200': { description: 'hint' } } } }
+  },
+  components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } }
+};
+
 const server = http.createServer((req,res)=>{
   const origin = req.headers.origin || '';
   if (ALLOW.includes('*') || ALLOW.includes(origin)) {
@@ -31,12 +43,22 @@ const server = http.createServer((req,res)=>{
     res.end(JSON.stringify({ok:true}));
     return;
   }
+  if (req.url === '/openapi.json') {
+    res.setHeader('Content-Type','application/json');
+    res.end(JSON.stringify(openapi));
+    return;
+  }
+  if (req.url === '/docs') {
+    res.setHeader('Content-Type','text/html');
+    res.end('<!doctype html><html><body><pre>OpenAPI: /openapi.json</pre></body></html>');
+    return;
+  }
   if (req.url === '/command' && req.method === 'POST') {
     const auth = req.headers.authorization || '';
     if (!TOKEN || auth !== `Bearer ${TOKEN}`) { res.statusCode=401; res.end('unauthorized'); return; }
     let body=''; req.on('data',d=>body+=d); req.on('end',()=>{
       pending = body;
-    res.setHeader('Content-Type','application/json');
+      res.setHeader('Content-Type','application/json');
       res.end(JSON.stringify({received:body, queued:true}));
     });
     return;
