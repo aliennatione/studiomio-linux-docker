@@ -12,6 +12,7 @@ const isolation = {
 };
 
 export default defineConfig({
+  base: process.env.GITHUB_ACTIONS ? '/studiomio-linux-docker/' : '/',
   define: { __APP_VERSION__: JSON.stringify(version) },
   server: { headers: isolation },
   preview: { headers: isolation },
