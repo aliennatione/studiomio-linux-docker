@@ -169,3 +169,9 @@ parallelism.
 ## License
 
 [MIT](LICENSE) © 2026 David
+
+## Deployment variants (this fork)
+
+- **GitHub Pages**: static build via `.github/workflows/pages.yml`; offline-capable via service worker.
+- **Linux/Docker**: `Dockerfile` (Alpine) + `nginx.conf` with COOP/COEP headers.
+- **Remote control**: `scripts/remote-server.mjs` (token Bearer + CORS) for VPS/local.
