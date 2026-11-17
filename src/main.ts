@@ -9,7 +9,7 @@ await Promise.all([
 ]);
 
 const app = new App(document.getElementById('app')!);
-import('./remote/edit-commands').then(m => { try { m.registerEditCommands(app); } catch (e) { console.warn('edit registry', e); } }).catch(() => {});
+import('./remote/edit-commands').then(m => { try { m.registerEditCommands(app); console.log('remote edit commands registered'); } catch (e) { console.warn('edit registry', e); } }).catch(e => console.warn('edit registry import failed', e));
 import('./remote/command-registry').then(m => { try { m.registerCommands(app); } catch (e) { console.warn('remote registry', e); } }).catch(() => {});
 
 // in development the app is reachable from the console (and from the automated checks); in the
