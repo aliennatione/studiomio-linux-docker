@@ -8,10 +8,14 @@ const ALLOW = (process.env.ALLOW_ORIGINS || '*').split(',').map(s=>s.trim()).fil
 const STATIC_DIR = process.env.STATIC_DIR || path.join(process.cwd(), 'dist');
 let pending = null;
 
-function send(res, code, body, type='text/plain') {
-  res.statusCode = code;
-  res.setHeader('Content-Type', type);
-  res.end(body);
+function validateCommand(body) {
+  let cmd;
+  try { cmd = JSON.parse(body); } catch { return null; }
+  if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd)) return null;
+  if (!['reload','invoke','set'].includes(cmd.action)) return null;
+  if (cmd.action === 'invoke' && typeof cmd.method !== 'string') return null;
+  if (cmd.action === 'set' && typeof cmd.path !== 'string') return null;
+  return cmd;
 }
 
 const openapi = {
@@ -19,7 +23,7 @@ const openapi = {
   info: { title: 'studiomio remote control', version: '1' },
   paths: {
     '/status': { get: { summary: 'status', responses: { '200': { description: 'ok' } } } },
-    '/command': { post: { summary: 'queue command', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'queued' }, '401': { description: 'unauthorized' } } } },
+    '/command': { post: { summary: 'queue command', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, responses: { '200': { description: 'queued' }, '400': { description: 'invalid' }, '401': { description: 'unauthorized' } } } },
     '/pending': { get: { summary: 'consume pending command', security: [{ bearerAuth: [] }], responses: { '200': { description: 'command' }, '401': { description: 'unauthorized' } } } },
     '/controls': { get: { summary: 'control inventory hint', responses: { '200': { description: 'hint' } } } }
   },
@@ -57,6 +61,8 @@ const server = http.createServer((req,res)=>{
     const auth = req.headers.authorization || '';
     if (!TOKEN || auth !== `Bearer ${TOKEN}`) { res.statusCode=401; res.end('unauthorized'); return; }
     let body=''; req.on('data',d=>body+=d); req.on('end',()=>{
+      const cmd = validateCommand(body);
+      if (!cmd) { res.statusCode=400; res.end('invalid command'); return; }
       pending = body;
       res.setHeader('Content-Type','application/json');
       res.end(JSON.stringify({received:body, queued:true}));
