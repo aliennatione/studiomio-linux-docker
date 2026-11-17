@@ -175,3 +175,9 @@ parallelism.
 - **GitHub Pages**: static build via `.github/workflows/pages.yml`; offline-capable via service worker.
 - **Linux/Docker**: `Dockerfile` (Alpine) + `nginx.conf` with COOP/COEP headers.
 - **Remote control**: `scripts/remote-server.mjs` (token Bearer + CORS) for VPS/local.
+
+### API remota e documentazione
+
+- L’API remota (`/status`, `/command`, `/pending`, `/controls`) è disponibile solo con il server companion (Docker/VPS/locale).
+- Spec OpenAPI: `/openapi.json` (servito sia dal server Node sia su Pages).
+- Su GitHub Pages l’API **non** è disponibile: l’app funziona solo in modalità statica/offline.
