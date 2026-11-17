@@ -74,6 +74,8 @@ export class App implements Commands, TimelineActions {
   readonly store = new ProjectStore(starterProject('New project', randomIds), randomIds);
   readonly audio = new AudioSystem(this.store);
   readonly session = new ProjectSession(this.store, this.audio);
+
+  createDemoProject() { return buildDemoProject(this.store, this.session); }
   /** The project folders opened or saved recently, for the File menu. */
   readonly recent = new RecentProjects();
   readonly ui = new UiState();
