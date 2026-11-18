@@ -9,8 +9,16 @@ await Promise.all([
 ]);
 
 const app = new App(document.getElementById('app')!);
-// Load demo techno project if available (generated at build time)
-fetch(import.meta.env.BASE_URL + 'demo-techno.json').then(r => r.ok ? r.json() : null).then(p => { if (p) { try { app.store.load(p); console.log('loaded demo-techno'); } catch (e) { console.warn('demo load failed', e); } } }).catch(() => {});
+// Expose demo loader (manual/API) instead of auto-loading to avoid blank screen
+app.loadDemoProject = async () => {
+  try {
+    const r = await fetch(import.meta.env.BASE_URL + 'demo-techno.json');
+    if (!r.ok) return false;
+    const p = await r.json();
+    app.store.load(p);
+    return true;
+  } catch (e) { console.warn('demo load failed', e); return false; }
+};
 import { registerEditCommands } from './remote/edit-commands';
 registerEditCommands(app);
 import { registerCommands } from './remote/command-registry';
