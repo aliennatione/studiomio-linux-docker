@@ -3,7 +3,7 @@ import { randomIds } from '../src/core/id';
 import { starterProject, addTrack, renameTrack } from '../src/store/edits';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const ids = randomIds();
+const ids = randomIds;
 const store = new ProjectStore(starterProject('Techno Demo', ids), ids);
 
 store.apply(addTrack('audio'));
