@@ -1,8 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 test('app renders non-empty #app', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(5000);
+  console.log('CONSOLE ERRORS:', JSON.stringify(errors));
   const html = await page.locator('#app').innerHTML();
   expect(html.length).toBeGreaterThan(0);
 });
