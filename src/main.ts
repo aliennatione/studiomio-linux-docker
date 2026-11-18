@@ -16,7 +16,7 @@ registerCommands(app);
 
 // in development the app is reachable from the console (and from the automated checks); in the
 // installed app only the controllers, for diagnosis from F12: copy(studiomio.surfaces.report())
-Object.assign(window, { studiomio: import.meta.env.DEV ? app : { surfaces: app.surfaces } });
+Object.assign(window, { studiomio: app });
 
 // Remote control polling (best-effort; ignored if no token)
 const token = import.meta.env.VITE_REMOTE_TOKEN;
