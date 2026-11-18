@@ -16,6 +16,7 @@ jobs:
       - run: npx vite build
         env:
           VITE_REMOTE_TOKEN: secret123
+      - run: npx tsx scripts/build-demo.ts
       - run: |
           REMOTE_TOKEN=secret123 PORT=8080 STATIC_DIR=./dist node scripts/remote-server.mjs &
           sleep 3
