@@ -1,7 +1,6 @@
 import * as edits from '../store/edits';
 
 export function registerEditCommands(app: any) {
-  console.log('registerEditCommands called, token present:', !!import.meta.env.VITE_REMOTE_TOKEN || 'secret123');
   const store = app.store;
   const commands: Record<string, (...args: any[]) => any> = app.commands || (app.commands = {});
   for (const [name, fn] of Object.entries(edits)) {
@@ -13,7 +12,7 @@ export function registerEditCommands(app: any) {
   commands['transport.stop'] = () => app.audio?.engine?.stop?.();
 
   // register schema
-  const token = import.meta.env.VITE_REMOTE_TOKEN || 'secret123';
+  const token = import.meta.env.VITE_REMOTE_TOKEN;
   if (token) {
     fetch('/register', {
       method: 'POST',
