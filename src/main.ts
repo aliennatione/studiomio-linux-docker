@@ -9,6 +9,8 @@ await Promise.all([
 ]);
 
 const app = new App(document.getElementById('app')!);
+// Load demo techno project if available (generated at build time)
+fetch('/demo-techno.json').then(r => r.ok ? r.json() : null).then(p => { if (p) { try { app.store.load(p); console.log('loaded demo-techno'); } catch (e) { console.warn('demo load failed', e); } } }).catch(() => {});
 import { registerEditCommands } from './remote/edit-commands';
 registerEditCommands(app);
 import { registerCommands } from './remote/command-registry';
