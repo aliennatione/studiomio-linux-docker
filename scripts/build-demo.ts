@@ -17,4 +17,3 @@ store.apply(renameTrack(c, 'Hats'));
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/demo-techno.json', JSON.stringify(store.project));
 console.log('demo written:', store.project.tracks.length, 'tracks');
-EOF
