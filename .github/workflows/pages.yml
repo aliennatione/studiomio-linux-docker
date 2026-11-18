@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 on:
   push:
-    branches: [main]
+    branches: [feature/remote-control-total]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/remote-control-total
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -23,6 +25,8 @@ jobs:
       - run: npx vite build
         env:
           GITHUB_ACTIONS: 'true'
+          VITE_REMOTE_TOKEN: secret123
+      - run: npx tsx scripts/build-demo.ts
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
