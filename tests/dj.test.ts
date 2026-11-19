@@ -92,3 +92,73 @@ describe('prompt control', () => {
     expect(cross.kind).toBe('cross');
   });
 });
+
+describe('automix', () => {
+  const fakeDeck = (name: string) => {
+    const d = {
+      name, loaded: true, playing: false, duration: 100, position: 0, bpm: 120,
+      aiMeta: { ...DEFAULT_AI_META, bpm: 120, key: '8A', energy: 0.5 },
+      async loadFile(f: File) { d.name = f.name; d.loaded = true; d.position = 0; },
+      play() { d.playing = true; }, pause() { d.playing = false; }, stop() { d.playing = false; },
+      normalize() {},
+    };
+    return d;
+  };
+  const fakeMixer = () => {
+    const m = {
+      crossfader: 0,
+      setCrossfader(v: number) { m.crossfader = v; },
+      syncAToB() {}, syncBToA() {},
+    };
+    return m;
+  };
+
+  it('advances queue with crossfade and falls back to manual', async () => {
+    const { Automix } = await import('../src/ui/dj/automix');
+    const A = fakeDeck('a'), B = fakeDeck('empty');
+    B.loaded = false;
+    const mixer = fakeMixer();
+    const am = new Automix({ A, B } as never, mixer as never);
+    const f = new File(['x'], 'next.mp3', { type: 'audio/mp3' });
+    am.enqueue([{ name: 'next.mp3', file: f, aiMeta: { ...DEFAULT_AI_META } }]);
+    A.playing = true;
+    am.crossfadeSec = 4;
+    am.start();
+    A.position = 97; // remaining 3 < 4 → preload + start fade
+    am.update(0.1);
+    await Promise.resolve();
+    expect(am.status()).toMatch(/ON/);
+  });
+
+  it('stops on empty queue (manual fallback)', async () => {
+    const { Automix } = await import('../src/ui/dj/automix');
+    const A = fakeDeck('a'), B = fakeDeck('b');
+    const mixer = fakeMixer();
+    const am = new Automix({ A, B } as never, mixer as never);
+    A.playing = true;
+    A.position = 99.99;
+    am.crossfadeSec = 4;
+    am.start();
+    am.update(0.1);
+    expect(am.running).toBe(false);
+    expect(am.status()).toMatch(/OFF/);
+  });
+});
+
+describe('ai generation', () => {
+  it('builds file names and offline pad', async () => {
+    const g = await import('../src/ui/dj/ai-generate');
+    expect(g.generateFileName('Deep House Pad!')).toBe('deep-house-pad.wav');
+    const [l, r] = g.synthPad('test', 1, 8000);
+    expect(l.length).toBe(8000);
+    expect(r.length).toBe(8000);
+    const clip = await g.generateClip({ prompt: 'test pad', seconds: 1 });
+    expect(clip.name.endsWith('.wav')).toBe(true);
+  });
+  it('parses automix prompt commands', async () => {
+    const { parseDjPrompt } = await import('../src/ui/dj/set-planner');
+    expect(parseDjPrompt('automix start')).toEqual({ kind: 'automix', action: 'start' });
+    expect(parseDjPrompt('automix stop')).toEqual({ kind: 'automix', action: 'stop' });
+    expect(parseDjPrompt('automix next')).toEqual({ kind: 'automix', action: 'next' });
+  });
+});

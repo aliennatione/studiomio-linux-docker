@@ -30,3 +30,13 @@ Modalità DJ in studiomio: `Arrangement / Session / DJ` (pulsante `🎧 DJ` nel 
 - `src/control/dj/dj-controller.ts`: mappa MIDI di default (note transport/hot cue/loop, CC pitch/crossfader).
 - `src/control/dj/mixxx-mapping.ts`: parser mapping Mixxx XML → binding DJ.
 - Nota licenze: codice DJ scritto ex novo; opendj è GPL-2.0, solo idee, nessun codice copiato.
+
+## Automix (6.x, stile Mixxx 9.x)
+- Pannello Automix: aggiungi file in coda, riordino AI (`AI order` = harmonic + energy flow), fade configurabile (2–30 s, default 8), Start/Stop/Next.
+- Transizioni: preload del prossimo brano sul deck libero, sync BPM, normalizzazione gain sul picco, crossfade lineare; a fine mix il deck vecchio si ferma.
+- Fallback manuale: coda vuota o caricamento fallito → automix OFF con avviso, i deck restano controllabili a mano.
+- Prompt: `automix start|stop|next`. Remote control: metodi app `djCommand(text)` e `djAutomix(action)` invocabili via `/command` → `invoke` (es. `{"action":"invoke","method":"djAutomix","args":["start"]}`); in produzione `window.studiomio` espone solo `surfaces`, da console dev c'è tutta l'app.
+
+## AI audio generation (8.x)
+- Pannello `AI audio`: prompt + secondi + deck → genera clip e la carica nel deck (con analisi AI).
+- `POST /generate { prompt, seconds }` su `ai-proxy` → `{ wavBase64, sampleRate, name }`; con `GENERATE_BACKEND_URL` fa proxy a un backend, altrimenti pad sintetico deterministico. Senza proxy, sintesi offline nel browser (stesso algoritmo, `synthPad`).

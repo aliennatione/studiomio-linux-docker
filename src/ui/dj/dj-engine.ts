@@ -32,11 +32,14 @@ class Deck {
   private loopStart = 0;
   private loopEnd = 0;
   private loopOn = false;
+  private readonly trim: GainNode;
   readonly gain: GainNode;
 
   constructor(private readonly ctx: AudioContext, destination: AudioNode) {
+    this.trim = ctx.createGain();
     this.gain = ctx.createGain();
     this.gain.gain.value = 1;
+    this.trim.connect(this.gain);
     this.gain.connect(destination);
   }
 
@@ -66,7 +69,7 @@ class Deck {
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.pitch;
-    src.connect(this.gain);
+    src.connect(this.trim);
     src.onended = () => { if (this.source === src) this._playing = false; };
     src.start(0, this.offset);
     this.source = src;
@@ -125,6 +128,28 @@ class Deck {
   }
 
   get cues(): readonly (number | null)[] { return this.hotCues; }
+
+  /** Peak of the loaded buffer (channel max), for gain normalization (task 9.2). */
+  peak(): number {
+    if (!this.buffer) return 0;
+    let peak = 0;
+    for (let c = 0; c < this.buffer.numberOfChannels; c++) {
+      const data = this.buffer.getChannelData(c);
+      // sample every 16th value: fast and good enough for normalization
+      for (let i = 0; i < data.length; i += 16) {
+        const v = Math.abs(data[i]);
+        if (v > peak) peak = v;
+      }
+    }
+    return peak;
+  }
+
+  /** Gain normalization to target peak (task 9.2). No-op without loaded audio. */
+  normalize(target = 0.89): void {
+    const peak = this.peak();
+    if (peak <= 0) return;
+    this.trim.gain.value = Math.min(4, Math.max(0.25, target / peak));
+  }
 
   /** Simple loop (task 5.3): loops current 4-beat region at deck BPM. */
   toggleLoop(): void {

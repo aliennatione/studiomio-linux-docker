@@ -1,5 +1,8 @@
 import { DjEngine } from './dj-engine';
 import { analyzeTrack } from './ai-analysis';
+import { generateClip } from './ai-generate';
+import { Automix, type AutomixTrack } from './automix';
+import { DEFAULT_AI_META } from '../../model/ai-meta';
 import { describeTransition, parseDjPrompt, suggestNext, type PlannedTrack } from './set-planner';
 
 function fmtTime(sec: number): string {
@@ -122,11 +125,21 @@ export class DjView {
   private readonly deckA: DeckPanel;
   private readonly deckB: DeckPanel;
   private readonly crossfader = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.001', value: '0.5' });
-  private readonly prompt = Object.assign(el('input'), { type: 'text', placeholder: 'Prompt: play A · sync B · cross middle · suggest' });
+  private readonly prompt = Object.assign(el('input'), { type: 'text', placeholder: 'Prompt: play A · sync B · cross middle · automix start · suggest' });
   private readonly promptOut = el('div', 'dj-info', '');
   private readonly suggest = el('div', 'dj-info', 'Suggerimenti: carica due tracce per i mix consigliati.');
+  readonly automix: Automix;
+  private readonly queueInput = Object.assign(el('input'), { type: 'file', accept: 'audio/*', multiple: true });
+  private readonly queueList = el('div', 'dj-queue');
+  private readonly queueStatus = el('div', 'dj-info', 'Automix: OFF');
+  private readonly fadeInput = Object.assign(el('input'), { type: 'number', min: '2', max: '30', step: '1', value: '8' });
+  private readonly genPrompt = Object.assign(el('input'), { type: 'text', placeholder: 'Descrivi il clip (es. deep house pad 122 BPM)' });
+  private readonly genSecs = Object.assign(el('input'), { type: 'number', min: '2', max: '60', step: '1', value: '8' });
+  private readonly genDeck = Object.assign(el('select'), {});
+  private readonly genStatus = el('div', 'dj-info', '');
   private raf = 0;
   private visible = false;
+  private lastTick = 0;
 
   constructor(ctx: AudioContext) {
     this.engine = new DjEngine(ctx);
@@ -141,13 +154,99 @@ export class DjView {
     run.onclick = () => this.runPrompt();
     this.prompt.onkeydown = (e) => { if (e.key === 'Enter') this.runPrompt(); };
     promptRow.append(labeled('Prompt', this.prompt), run);
-    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest);
+
+    // Automix panel (tasks 6.x, 9.x)
+    this.automix = new Automix({ A: this.engine.deckA, B: this.engine.deckB }, this.engine);
+    const autoTitle = el('div', 'dj-deck-title', 'Automix');
+    const autoBtns = el('div', 'dj-controls');
+    const startBtn = Object.assign(el('button', '', 'Start'), { onclick: () => this.automixCmd('start') });
+    const stopBtn = Object.assign(el('button', '', 'Stop'), { onclick: () => this.automixCmd('stop') });
+    const nextBtn = Object.assign(el('button', '', 'Next'), { onclick: () => this.automixCmd('next') });
+    const orderBtn = Object.assign(el('button', '', 'AI order'), { onclick: () => { this.automix.reorder(); this.renderQueue(); } });
+    autoBtns.append(startBtn, stopBtn, nextBtn, orderBtn, labeled('Fade s', this.fadeInput));
+    this.fadeInput.onchange = () => {
+      const v = parseFloat(this.fadeInput.value);
+      if (isFinite(v)) this.automix.crossfadeSec = Math.min(30, Math.max(2, v));
+    };
+    this.queueInput.onchange = () => void this.addToQueue();
+    const autoPanel = el('div', 'dj-panel');
+    autoPanel.append(autoTitle, labeled('Coda', this.queueInput), this.queueList, autoBtns, this.queueStatus);
+
+    // AI generation panel (task 8.x)
+    this.genDeck.append(Object.assign(el('option'), { value: 'A', textContent: 'Deck A' }), Object.assign(el('option'), { value: 'B', textContent: 'Deck B' }));
+    (this.genDeck as HTMLSelectElement).value = 'B';
+    const genBtn = Object.assign(el('button', '', 'Genera'), { onclick: () => void this.generate() });
+    const genPanel = el('div', 'dj-panel');
+    const genRow = el('div', 'dj-row');
+    genRow.append(labeled('Prompt', this.genPrompt), labeled('Sec', this.genSecs), labeled('Deck', this.genDeck), genBtn);
+    genPanel.append(el('div', 'dj-deck-title', 'AI audio'), genRow, this.genStatus);
+
+    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest, autoPanel, genPanel);
 
     this.crossfader.oninput = () => this.engine.setCrossfader(parseFloat(this.crossfader.value));
   }
 
-  private runPrompt(): void {
-    const cmd = parseDjPrompt(this.prompt.value);
+  /** Automix control (app + remote, tasks 6.2/9.3). */
+  automixCmd(action: 'start' | 'stop' | 'next'): void {
+    if (action === 'start') this.automix.start();
+    else if (action === 'stop') this.automix.stop();
+    else this.automix.next();
+    this.renderQueue();
+  }
+
+  private async addToQueue(): Promise<void> {
+    const files = [...(this.queueInput.files ?? [])];
+    this.queueInput.value = '';
+    const tracks: AutomixTrack[] = [];
+    for (const f of files) {
+      try {
+        const { meta } = await analyzeTrack(f, 0);
+        tracks.push({ name: f.name, file: f, aiMeta: meta });
+      } catch {
+        tracks.push({ name: f.name, file: f, aiMeta: DEFAULT_AI_META });
+      }
+    }
+    this.automix.enqueue(tracks);
+    this.renderQueue();
+  }
+
+  private renderQueue(): void {
+    this.queueList.textContent = '';
+    this.automix.queue.forEach((t, i) => {
+      const row = el('div', 'dj-queue-row');
+      const rm = Object.assign(el('button', '', '✕'), {
+        onclick: () => { this.automix.removeAt(i); this.renderQueue(); },
+      });
+      row.append(el('span', '', `${i + 1}. ${t.name} (${t.aiMeta.bpm} BPM · ${t.aiMeta.key || '?'})`), rm);
+      this.queueList.append(row);
+    });
+    if (!this.automix.queue.length) this.queueList.append(el('span', 'dj-muted', 'Coda vuota: aggiungi file audio.'));
+    this.queueStatus.textContent = `Automix: ${this.automix.status()}`;
+  }
+
+  /** Generates an AI clip and loads it into the chosen deck (task 8.2). */
+  private async generate(): Promise<void> {
+    const prompt = this.genPrompt.value.trim();
+    if (!prompt) { this.genStatus.textContent = 'Scrivi un prompt prima.'; return; }
+    const secs = Math.min(60, Math.max(2, parseInt(this.genSecs.value, 10) || 8));
+    this.genStatus.textContent = 'Generazione…';
+    try {
+      const file = await generateClip({ prompt, seconds: secs });
+      const deck = (this.genDeck as HTMLSelectElement).value === 'B' ? this.engine.deckB : this.engine.deckA;
+      await deck.loadFile(file);
+      const { meta } = await analyzeTrack(file, deck.duration);
+      deck.aiMeta = meta;
+      deck.bpm = meta.bpm;
+      this.genStatus.textContent = `Pronto: ${file.name} → deck ${(this.genDeck as HTMLSelectElement).value}`;
+      this.updateSuggestions();
+    } catch (e) {
+      this.genStatus.textContent = `Errore: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  /** Prompt entrypoint (UI + remote control, task 6.2). */
+  runPromptText(text: string): void {
+    const cmd = parseDjPrompt(text);
     const e = this.engine;
     switch (cmd.kind) {
       case 'play':
@@ -173,8 +272,13 @@ export class DjView {
         break;
       }
       case 'suggest': this.updateSuggestions(); this.promptOut.textContent = '💡 suggerimenti aggiornati'; break;
+      case 'automix': this.automixCmd(cmd.action); this.promptOut.textContent = `🔀 automix ${cmd.action}`; break;
       default: this.promptOut.textContent = `? comando non capito: "${(cmd as { text: string }).text}"`; break;
     }
+  }
+
+  private runPrompt(): void {
+    this.runPromptText(this.prompt.value);
   }
 
   private updateSuggestions(): void {
@@ -200,10 +304,15 @@ export class DjView {
     else if (this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; }
   }
 
-  private tick = (): void => {
+  private tick = (now: number = 0): void => {
     if (!this.visible) return;
+    const dt = this.lastTick ? Math.min(0.5, (now - this.lastTick) / 1000) : 0.016;
+    this.lastTick = now;
     this.deckA.render();
     this.deckB.render();
+    this.automix.update(dt);
+    this.crossfader.value = String(this.engine.crossfader);
+    this.queueStatus.textContent = `Automix: ${this.automix.status()}`;
     this.raf = requestAnimationFrame(this.tick);
   };
 }

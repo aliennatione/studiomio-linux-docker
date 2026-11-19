@@ -29,6 +29,7 @@ export type DjCommand =
   | { readonly kind: 'cross'; readonly value: number }
   | { readonly kind: 'pitch'; readonly deck: 'A' | 'B'; readonly delta: number }
   | { readonly kind: 'suggest' }
+  | { readonly kind: 'automix'; readonly action: 'start' | 'stop' | 'next' }
   | { readonly kind: 'unknown'; readonly text: string };
 
 export function parseDjPrompt(text: string): DjCommand {
@@ -38,6 +39,11 @@ export function parseDjPrompt(text: string): DjCommand {
   if (/^(pause|stop)/.test(t)) return { kind: 'pause', deck: (deck ?? 'both') as 'A' | 'B' | 'both' };
   if (/cue/.test(t)) return { kind: 'cue', deck: deck ?? 'A' };
   if (/sync/.test(t)) return { kind: 'sync', deck: deck ?? 'B' };
+  const auto = t.match(/automix\s*(start|stop|next|on|off|skip)?/);
+  if (/automix/.test(t)) {
+    const a = auto?.[1];
+    return { kind: 'automix', action: a === 'stop' || a === 'off' ? 'stop' : a === 'next' || a === 'skip' ? 'next' : 'start' };
+  }
   if (/suggest|consigli|next/.test(t)) return { kind: 'suggest' };
   const cross = t.match(/cross\w*\s*(a|b|left|right|mid\w*|center|(\d{1,3}))?/);
   if (cross) {

@@ -863,3 +863,14 @@ body.track-dragging, body.track-dragging * { cursor: grabbing !important; }
 .dj-deck input[type="range"] { width: 100%; }
 .dj-deck input[type="number"] { width: 90px; }
 .dj-deck input[type="file"] { font-size: 12px; }
+
+/* DJ automix + AI panels */
+.dj-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dj-queue { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow: auto; font-size: 12px; }
+.dj-queue-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px; border-radius: 3px; background: var(--panel-2); }
+.dj-queue-row button { padding: 0 6px; }
+.dj-muted { color: var(--muted); font-size: 12px; }
+.dj-panel input[type="file"] { font-size: 12px; }
+.dj-panel input[type="number"] { width: 70px; }
+.dj-panel input[type="text"] { flex: 1; min-width: 140px; }
+.dj-panel select { font-size: 12px; }

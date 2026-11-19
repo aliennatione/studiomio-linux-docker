@@ -540,6 +540,10 @@ export class App implements Commands, TimelineActions {
     if (!ungroupSelectedTrack(this.store, this.ui)) this.say('Choose a group (or one of its tracks) to ungroup.');
   }
 
+  /** DJ remote control (task 6.2): reachable via remote /command invoke. */
+  djCommand(text: string): void { this.djView.runPromptText(text); }
+  djAutomix(action: 'start' | 'stop' | 'next'): void { this.djView.automixCmd(action); }
+
   /** Shows the timeline or the session (one in place of the other, as in Live). */
   showView(view: 'arrangement' | 'session' | 'dj'): void {
     this.arrangementArea.hidden = view !== 'arrangement';
