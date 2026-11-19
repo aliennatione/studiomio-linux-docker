@@ -1,0 +1,209 @@
+import { DjEngine } from './dj-engine';
+import { analyzeTrack } from './ai-analysis';
+import { describeTransition, parseDjPrompt, suggestNext, type PlannedTrack } from './set-planner';
+
+function fmtTime(sec: number): string {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function labeled(label: string, control: HTMLElement): HTMLElement {
+  const wrap = el('label', 'dj-field');
+  wrap.append(el('span', 'dj-label', label), control);
+  return wrap;
+}
+
+class DeckPanel {
+  readonly element = el('div', 'dj-deck');
+  private readonly title = el('div', 'dj-deck-title', 'Deck');
+  private readonly file = Object.assign(el('input'), { type: 'file', accept: 'audio/*' });
+  private readonly info = el('div', 'dj-info', 'No track');
+  private readonly ai = el('div', 'dj-ai', 'AI: —');
+  private readonly time = el('div', 'dj-time', '0:00 / 0:00');
+  private readonly seek = Object.assign(el('input'), { type: 'range', min: '0', max: '1000', value: '0' });
+  private readonly playBtn = el('button', '', 'Play');
+  private readonly cueBtn = el('button', '', 'Cue');
+  private readonly loopBtn = el('button', '', 'Loop');
+  private readonly pitch = Object.assign(el('input'), { type: 'range', min: '0.5', max: '1.5', step: '0.001', value: '1' });
+  private readonly pitchVal = el('span', 'dj-pitch-val', '0%');
+  private readonly bpm = Object.assign(el('input'), { type: 'number', min: '40', max: '300', step: '0.1', value: '120' });
+  private readonly keyInput = Object.assign(el('input'), { type: 'text', placeholder: 'Key (8A)', value: '' });
+  private readonly hotRow = el('div', 'dj-controls');
+  private seeking = false;
+
+  constructor(
+    name: string,
+    private readonly deck: DjEngine['deckA'],
+    onSync: () => void,
+    private readonly onAnalyzed: () => void,
+  ) {
+    this.title.textContent = name;
+    const controls = el('div', 'dj-controls');
+    controls.append(this.playBtn, this.cueBtn, this.loopBtn, Object.assign(el('button', '', 'Sync'), { onclick: onSync }));
+    for (let i = 0; i < 4; i++) {
+      const set = Object.assign(el('button', '', `H${i + 1}●`));
+      const go = Object.assign(el('button', '', `H${i + 1}▶`));
+      set.title = `Set hot cue ${i + 1}`;
+      go.title = `Jump hot cue ${i + 1}`;
+      set.onclick = () => { this.deck.setHotCue(i); this.render(); };
+      go.onclick = () => { this.deck.jumpHotCue(i); this.render(); };
+      this.hotRow.append(set, go);
+    }
+    const pitchRow = el('div', 'dj-row');
+    pitchRow.append(labeled('Pitch', this.pitch), this.pitchVal);
+    const bpmRow = el('div', 'dj-row');
+    bpmRow.append(labeled('BPM', this.bpm), labeled('Key', this.keyInput));
+    this.element.append(this.title, this.file, this.info, this.ai, this.time, this.seek, controls, this.hotRow, pitchRow, bpmRow);
+
+    this.file.onchange = async () => {
+      const f = this.file.files?.[0];
+      if (!f) return;
+      try {
+        this.info.textContent = 'Loading…';
+        await this.deck.loadFile(f);
+        this.info.textContent = this.deck.name;
+        const { meta, cached } = await analyzeTrack(f, this.deck.duration);
+        this.deck.aiMeta = meta;
+        this.deck.bpm = meta.bpm;
+        this.bpm.value = String(meta.bpm);
+        this.keyInput.value = meta.key;
+        this.ai.textContent = `AI: ${meta.bpm} BPM · ${meta.key || '?'} · ${meta.genre || '—'} · E${meta.energy.toFixed(1)}${cached ? ' (cache)' : ''}`;
+        this.onAnalyzed();
+      } catch (e) {
+        this.info.textContent = `Load error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      this.render();
+    };
+    this.playBtn.onclick = () => { this.deck.playing ? this.deck.pause() : this.deck.play(); this.render(); };
+    this.cueBtn.onclick = () => { this.deck.cue(); this.render(); };
+    this.loopBtn.onclick = () => { this.deck.toggleLoop(); this.render(); };
+    this.pitch.oninput = () => {
+      const rate = parseFloat(this.pitch.value);
+      this.deck.setPitch(rate);
+      this.pitchVal.textContent = `${((rate - 1) * 100).toFixed(1)}%`;
+      this.render();
+    };
+    this.bpm.onchange = () => {
+      const v = parseFloat(this.bpm.value);
+      if (isFinite(v) && v > 0) { this.deck.bpm = v; this.deck.aiMeta = { ...this.deck.aiMeta, bpm: v }; }
+    };
+    this.keyInput.onchange = () => { this.deck.aiMeta = { ...this.deck.aiMeta, key: this.keyInput.value.trim() }; };
+    this.seek.oninput = () => { this.seeking = true; };
+    this.seek.onchange = () => {
+      const ratio = parseInt(this.seek.value, 10) / 1000;
+      this.deck.seek(ratio * this.deck.duration);
+      this.seeking = false;
+      this.render();
+    };
+  }
+
+  render(): void {
+    const s = this.deck.state();
+    this.playBtn.textContent = s.playing ? 'Pause' : 'Play';
+    this.loopBtn.textContent = s.loop.enabled ? 'Loop●' : 'Loop';
+    this.time.textContent = `${fmtTime(s.position)} / ${fmtTime(s.duration)}`;
+    if (!this.seeking && s.duration > 0) this.seek.value = String(Math.round((s.position / s.duration) * 1000));
+    this.pitchVal.textContent = `${((s.pitch - 1) * 100).toFixed(1)}%`;
+  }
+}
+
+export class DjView {
+  readonly element = el('div', 'dj-view');
+  readonly engine: DjEngine;
+  private readonly deckA: DeckPanel;
+  private readonly deckB: DeckPanel;
+  private readonly crossfader = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.001', value: '0.5' });
+  private readonly prompt = Object.assign(el('input'), { type: 'text', placeholder: 'Prompt: play A · sync B · cross middle · suggest' });
+  private readonly promptOut = el('div', 'dj-info', '');
+  private readonly suggest = el('div', 'dj-info', 'Suggerimenti: carica due tracce per i mix consigliati.');
+  private raf = 0;
+  private visible = false;
+
+  constructor(ctx: AudioContext) {
+    this.engine = new DjEngine(ctx);
+    this.deckA = new DeckPanel('Deck A', this.engine.deckA, () => { this.engine.syncAToB(); this.deckA.render(); }, () => this.updateSuggestions());
+    this.deckB = new DeckPanel('Deck B', this.engine.deckB, () => { this.engine.syncBToA(); this.deckB.render(); }, () => this.updateSuggestions());
+    const decks = el('div', 'dj-decks');
+    decks.append(this.deckA.element, this.deckB.element);
+    const mixer = el('div', 'dj-mixer');
+    mixer.append(el('span', '', 'A'), labeled('Crossfader', this.crossfader), el('span', '', 'B'));
+    const promptRow = el('div', 'dj-mixer');
+    const run = Object.assign(el('button', '', 'Run'));
+    run.onclick = () => this.runPrompt();
+    this.prompt.onkeydown = (e) => { if (e.key === 'Enter') this.runPrompt(); };
+    promptRow.append(labeled('Prompt', this.prompt), run);
+    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest);
+
+    this.crossfader.oninput = () => this.engine.setCrossfader(parseFloat(this.crossfader.value));
+  }
+
+  private runPrompt(): void {
+    const cmd = parseDjPrompt(this.prompt.value);
+    const e = this.engine;
+    switch (cmd.kind) {
+      case 'play':
+        if (cmd.deck === 'A' || cmd.deck === 'both') e.deckA.play();
+        if (cmd.deck === 'B' || cmd.deck === 'both') e.deckB.play();
+        this.promptOut.textContent = `▶ play ${cmd.deck}`;
+        break;
+      case 'pause':
+        if (cmd.deck === 'A' || cmd.deck === 'both') e.deckA.pause();
+        if (cmd.deck === 'B' || cmd.deck === 'both') e.deckB.pause();
+        this.promptOut.textContent = `⏸ pause ${cmd.deck}`;
+        break;
+      case 'cue': (cmd.deck === 'B' ? e.deckB : e.deckA).cue(); this.promptOut.textContent = `⏮ cue ${cmd.deck}`; break;
+      case 'sync':
+        if (cmd.deck === 'A') e.syncAToB(); else e.syncBToA();
+        this.promptOut.textContent = `🔗 sync ${cmd.deck}`;
+        break;
+      case 'cross': e.setCrossfader(cmd.value); this.crossfader.value = String(cmd.value); this.promptOut.textContent = `🎚 cross ${cmd.value.toFixed(2)}`; break;
+      case 'pitch': {
+        const d = cmd.deck === 'B' ? e.deckB : e.deckA;
+        d.setPitch(d.pitch + cmd.delta);
+        this.promptOut.textContent = `🎛 pitch ${cmd.deck} ${cmd.delta >= 0 ? '+' : ''}${(cmd.delta * 100).toFixed(1)}%`;
+        break;
+      }
+      case 'suggest': this.updateSuggestions(); this.promptOut.textContent = '💡 suggerimenti aggiornati'; break;
+      default: this.promptOut.textContent = `? comando non capito: "${(cmd as { text: string }).text}"`; break;
+    }
+  }
+
+  private updateSuggestions(): void {
+    const a = this.engine.deckA;
+    const b = this.engine.deckB;
+    if (!a.loaded || !b.loaded) {
+      this.suggest.textContent = 'Suggerimenti: carica due tracce per i mix consigliati.';
+      return;
+    }
+    const fromA: PlannedTrack[] = [{ name: b.name || 'Deck B', aiMeta: b.aiMeta }];
+    const fromB: PlannedTrack[] = [{ name: a.name || 'Deck A', aiMeta: a.aiMeta }];
+    const s1 = suggestNext(a.aiMeta, fromA, 1)[0];
+    const s2 = suggestNext(b.aiMeta, fromB, 1)[0];
+    this.suggest.textContent = s1 && s2
+      ? `Live: A→B ${describeTransition(a.aiMeta, s1.aiMeta)} · B→A ${describeTransition(b.aiMeta, s2.aiMeta)}`
+      : 'Suggerimenti: —';
+  }
+
+  show(on: boolean): void {
+    this.visible = on;
+    this.element.hidden = !on;
+    if (on) this.tick();
+    else if (this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; }
+  }
+
+  private tick = (): void => {
+    if (!this.visible) return;
+    this.deckA.render();
+    this.deckB.render();
+    this.raf = requestAnimationFrame(this.tick);
+  };
+}

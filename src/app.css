@@ -843,3 +843,23 @@ button.browser-preview-toggle { flex: none; padding: 0 6px; font-size: 12px; lin
 body.track-dragging { user-select: none; }
 body.track-dragging, body.track-dragging * { cursor: grabbing !important; }
 .header.dragging, .session-head.dragging, .scene.dragging { opacity: .45; }
+
+/* DJ mode MVP */
+.dj-view { display: flex; flex-direction: column; height: 100%; padding: 12px; gap: 12px; overflow: auto; box-sizing: border-box; }
+.dj-decks { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.dj-deck { flex: 1; min-width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dj-deck-title { font-weight: 600; font-size: 14px; }
+.dj-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.dj-controls button { padding: 4px 10px; }
+.dj-row { display: flex; align-items: center; gap: 8px; }
+.dj-field { display: flex; align-items: center; gap: 6px; flex: 1; }
+.dj-label { font-size: 12px; color: var(--muted); min-width: 50px; }
+.dj-info { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dj-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+.dj-pitch-val { font-size: 12px; color: var(--muted); min-width: 48px; }
+.dj-mixer { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.dj-mixer .dj-field { flex: 0 1 420px; }
+.dj-mixer input[type="range"] { width: 100%; }
+.dj-deck input[type="range"] { width: 100%; }
+.dj-deck input[type="number"] { width: 90px; }
+.dj-deck input[type="file"] { font-size: 12px; }

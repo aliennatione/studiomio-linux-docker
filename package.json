@@ -24,7 +24,8 @@
     "preversion": "node scripts/changelog.mjs check",
     "version": "node scripts/changelog.mjs release && git add CHANGELOG.md",
     "remote": "node scripts/remote-server.mjs",
-    "test:remote": "node --test scripts/remote-server.test.mjs"
+    "test:remote": "node --test scripts/remote-server.test.mjs",
+    "ai-proxy": "node scripts/ai-proxy.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

@@ -50,6 +50,7 @@ import { resolveSelection } from '../ui/timeline/planning';
 import { MasterAutomation } from '../ui/master-automation';
 import { MasterStrip } from '../ui/master-strip';
 import { SessionView } from '../ui/session/session-view';
+import { DjView } from '../ui/dj/dj-view';
 import { MeterBoard } from '../ui/meters/meter-board';
 import { groupSelectedTracks, ungroupSelectedTrack } from '../ui/track-groups';
 import { TrackHeaders } from '../ui/track-headers';
@@ -85,6 +86,7 @@ export class App implements Commands, TimelineActions {
   readonly pianoRoll: PianoRoll;
   readonly device: DeviceView;
   readonly sessionView: SessionView;
+  readonly djView: DjView;
   /** The browser on the left: its sources, who loads what is chosen, the view. */
   readonly catalog = new BrowserCatalog<FsFolder>(standardSources({
     instruments: INSTRUMENT_TYPES, effects: EFFECT_TYPES, user: userPresets, racks: userRacks, factoryRacks: FACTORY_RACKS, project: this.store,
@@ -92,7 +94,8 @@ export class App implements Commands, TimelineActions {
   private readonly loader: BrowserLoader;
   readonly browser: BrowserView;
   private readonly arrangementArea = Object.assign(document.createElement('div'), { className: 'arrangement' });
-  private readonly viewButtons: { arrangement: HTMLButtonElement; session: HTMLButtonElement; back: HTMLButtonElement };
+  private readonly djArea = Object.assign(document.createElement('div'), { className: 'dj' });
+  private readonly viewButtons: { arrangement: HTMLButtonElement; session: HTMLButtonElement; dj: HTMLButtonElement; back: HTMLButtonElement };
   private readonly browserButton: HTMLButtonElement;
   private readonly bottom = new BottomPanel();
   /** Clipboard shared by timeline and piano roll. */
@@ -210,7 +213,10 @@ export class App implements Commands, TimelineActions {
     const masterAccepts = (p: BrowserItem['payload']) => p?.kind === 'effect' || (p?.kind === 'rack' && !p.rack.instrument);
     acceptBrowserDrops(master.header, item => dropItem(item, { kind: 'chain', owner: MASTER }), { accept: item => masterAccepts(item.payload) });
     const views = Object.assign(document.createElement('div'), { className: 'views' });
-    views.append(main, this.sessionView.element);
+    views.append(main, this.sessionView.element, this.djArea);
+    this.djArea.hidden = true;
+    this.djView = new DjView(this.audio.context);
+    this.djArea.append(this.djView.element);
     // the browser on the left, next to the views and the bottom area, as in Live
     const work = Object.assign(document.createElement('div'), { className: 'work' });
     work.append(views, this.bottom.element);
@@ -222,11 +228,12 @@ export class App implements Commands, TimelineActions {
     this.viewButtons = {
       arrangement: viewButton('☰ Arr.', 'Arrangement: la timeline (Tab)', () => this.showView('arrangement')),
       session: viewButton('▦ Session', 'Session: the clips to launch, scene by scene, and the mixer (Tab)', () => this.showView('session')),
+      dj: viewButton('🎧 DJ', 'DJ mode: 2 deck + mixer + crossfader', () => this.showView('dj')),
       back: viewButton('↩', 'Back to arrangement: the tracks taken by the session go back to playing their timeline', () => this.audio.engine.backToArrangement()),
     };
     this.viewButtons.back.className = 'back-to-arrangement';
     this.browserButton = viewButton('◧ Browser', 'Show or hide the browser (Ctrl+Alt+B)', () => this.toggleBrowser());
-    transport.addGroup(this.browserButton, this.viewButtons.arrangement, this.viewButtons.session, this.viewButtons.back);
+    transport.addGroup(this.browserButton, this.viewButtons.arrangement, this.viewButtons.session, this.viewButtons.dj, this.viewButtons.back);
     this.surfaces = this.controlSurfaces();
     this.audio.engine.onSessionChange(() => this.renderViews());
     this.audio.engine.onClipSound((track, sound) => this.store.apply(followClipSound(track, sound), { transient: true }));
@@ -534,9 +541,11 @@ export class App implements Commands, TimelineActions {
   }
 
   /** Shows the timeline or the session (one in place of the other, as in Live). */
-  showView(view: 'arrangement' | 'session'): void {
+  showView(view: 'arrangement' | 'session' | 'dj'): void {
     this.arrangementArea.hidden = view !== 'arrangement';
     this.sessionView.show(view === 'session');
+    this.djArea.hidden = view !== 'dj';
+    this.djView.show(view === 'dj');
     this.renderViews();
   }
 
@@ -606,8 +615,10 @@ export class App implements Commands, TimelineActions {
   private renderViews(): void {
     this.browserButton.classList.toggle('on', this.browser.isOpen);
     const session = this.sessionView.isVisible;
-    this.viewButtons.arrangement.classList.toggle('on', !session);
+    const dj = !this.djArea.hidden;
+    this.viewButtons.arrangement.classList.toggle('on', !session && !dj);
     this.viewButtons.session.classList.toggle('on', session);
+    this.viewButtons.dj.classList.toggle('on', dj);
     const taken = this.audio.engine.arrangementOverridden;
     this.viewButtons.back.disabled = !taken;
     this.viewButtons.back.classList.toggle('lit', taken);
