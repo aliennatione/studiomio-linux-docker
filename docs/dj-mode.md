@@ -52,3 +52,9 @@ Modalità DJ in studiomio: `Arrangement / Session / DJ` (pulsante `🎧 DJ` nel 
 - Verificati su https://ai.google.dev/gemini-api/docs/music-generation : realtime resta `lyria-realtime-exp`; i nuovi modelli sono **Lyria 3.5** (`lyria-3.5`, brani interi di un paio di minuti, 44.1 kHz stereo MP3) e **Lyria 3 Clip** (`lyria-3-clip-preview`, clip 30 s) via **Interactions API** (`client.interactions.create({model, input})` → `output_audio.data` + `output_text` con testo/struttura).
 - `POST /interactions` in `ai-proxy` (allowlist modelli, `GEMINI_API_KEY` richiesta) + client `generateLyriaClip`/`parseInteractions`/`isLyriaModel` in `ai-generate.ts`.
 - Pannello AI audio: selettore modello (Pad offline / Lyria 3 Clip / Lyria 3.5); il testo generato è mostrato nello stato; senza proxy/chiave si usa il pad offline.
+
+## Parità mypromptdj
+- Strategie automix ×5 (`strategies.ts`): harmonic, energy-buildup, energy-wave, bpm-ladder, smart-ai + `evaluateTransition` (score 0–100, label armonica, pitch %, stile/durata consigliati) + `smoothAdjacentKeys` + `getRankedSuggestions` (score/motivo/label).
+- Stili di transizione: smooth, bass-swap (lowshelf), filter-sweep (lowpass), quick-cut, echo-out (delay+feedback) + `auto` (consigliato da analisi). Deck con catena src→lowpass→lowshelf→trim→crossfade.
+- Analisi audio intera via proxy `POST /analyze-track` (base64, max 12 MB) e `POST /interpret-prompt` → pesi (`ai-weights.ts`); comando prompt `pesi …` ("pesi più energia").
+- Piattaforme: ricerca iTunes con preview 30 s riproducibili, resolve URL (oEmbed + match iTunes, MP3 diretti), casse curate come sorgente browser `DJ Online` + pannello ricerca in DJ view (Load A/B).

@@ -33,14 +33,64 @@ class Deck {
   private loopEnd = 0;
   private loopOn = false;
   private readonly trim: GainNode;
+  private readonly lowpass: BiquadFilterNode;
+  private readonly bass: BiquadFilterNode;
+  private readonly echoSend: GainNode;
   readonly gain: GainNode;
 
   constructor(private readonly ctx: AudioContext, destination: AudioNode) {
     this.trim = ctx.createGain();
     this.gain = ctx.createGain();
     this.gain.gain.value = 1;
+    // tone chain: source → lowpass (sweep) → lowshelf bass → trim → crossfade gain
+    this.lowpass = ctx.createBiquadFilter();
+    this.lowpass.type = 'lowpass';
+    this.lowpass.frequency.value = 20000;
+    this.bass = ctx.createBiquadFilter();
+    this.bass.type = 'lowshelf';
+    this.bass.frequency.value = 320;
+    this.lowpass.connect(this.bass);
+    this.bass.connect(this.trim);
     this.trim.connect(this.gain);
     this.gain.connect(destination);
+    // echo tail (echo-out style): trim → send → delay ⇄ feedback → out → crossfade gain
+    const delay = ctx.createDelay(2);
+    delay.delayTime.value = 0.375;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.45;
+    const echoOut = ctx.createGain();
+    echoOut.gain.value = 0.7;
+    this.echoSend = ctx.createGain();
+    this.echoSend.gain.value = 0;
+    this.trim.connect(this.echoSend);
+    this.echoSend.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(echoOut);
+    echoOut.connect(this.gain);
+  }
+
+  /** Bass shelf in dB (bass-swap style). */
+  setBassDb(db: number): void {
+    this.bass.gain.setTargetAtTime(Math.max(-30, Math.min(12, db)), this.ctx.currentTime, 0.05);
+  }
+
+  /** Lowpass cutoff in Hz (filter-sweep style). */
+  setCutoff(hz: number): void {
+    this.lowpass.frequency.setTargetAtTime(Math.max(60, Math.min(20000, hz)), this.ctx.currentTime, 0.05);
+  }
+
+  /** Echo send 0..1 (echo-out style). */
+  setEchoSend(v: number): void {
+    this.echoSend.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), this.ctx.currentTime, 0.05);
+  }
+
+  /** Restores flat tone after a styled transition. */
+  resetFx(): void {
+    const t = this.ctx.currentTime;
+    this.bass.gain.setTargetAtTime(0, t, 0.05);
+    this.lowpass.frequency.setTargetAtTime(20000, t, 0.05);
+    this.echoSend.gain.setTargetAtTime(0, t, 0.05);
   }
 
   get loaded(): boolean { return !!this.buffer; }
@@ -69,7 +119,7 @@ class Deck {
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.pitch;
-    src.connect(this.trim);
+    src.connect(this.lowpass);
     src.onended = () => { if (this.source === src) this._playing = false; };
     src.start(0, this.offset);
     this.source = src;

@@ -1,8 +1,13 @@
 import { DjEngine } from './dj-engine';
 import { analyzeTrack } from './ai-analysis';
 import { generateClip, type LyriaModel } from './ai-generate';
-import { Automix, type AutomixTrack } from './automix';
+import { Automix, type AutomixMode, type AutomixTrack, type TransitionChoice } from './automix';
+import type { AutomixStrategy } from './strategies';
 import { LyriaSession, lyriaUrl, setLyriaUrl, type WeightedPrompt } from './lyria-session';
+import { interpretPromptForWeights } from './ai-weights';
+import { getAlgorithmWeights } from './strategies';
+import { getRankedSuggestions } from './strategies';
+import { itunesSearch, previewFile, resolveUrl, type PlatformTrack } from '../../browser/sources/platform';
 import { encodeWav } from '../../dsp/codec/wav';
 import { DEFAULT_AI_META } from '../../model/ai-meta';
 import { describeTransition, parseDjPrompt, suggestNext, type PlannedTrack } from './set-planner';
@@ -135,6 +140,9 @@ export class DjView {
   private readonly queueList = el('div', 'dj-queue');
   private readonly queueStatus = el('div', 'dj-info', 'Automix: OFF');
   private readonly fadeInput = Object.assign(el('input'), { type: 'number', min: '2', max: '30', step: '1', value: '8' });
+  private readonly modeSelect = Object.assign(el('select'), {});
+  private readonly strategySelect = Object.assign(el('select'), {});
+  private readonly styleSelect = Object.assign(el('select'), {});
   private readonly genPrompt = Object.assign(el('input'), { type: 'text', placeholder: 'Descrivi il clip (es. deep house pad 122 BPM)' });
   private readonly genSecs = Object.assign(el('input'), { type: 'number', min: '2', max: '60', step: '1', value: '8' });
   private readonly genDeck = Object.assign(el('select'), {});
@@ -148,6 +156,10 @@ export class DjView {
   private readonly lyriaBpm = Object.assign(el('input'), { type: 'number', min: '60', max: '200', step: '1', value: '120' });
   private readonly lyriaDensity = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.01', value: '0.5' });
   private readonly lyriaBright = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.01', value: '0.5' });
+  private readonly searchInput = Object.assign(el('input'), { type: 'text', placeholder: 'Cerca brani (iTunes preview 30s)' });
+  private readonly urlInput = Object.assign(el('input'), { type: 'text', placeholder: 'o incolla URL Spotify/SoundCloud/YouTube/MP3' });
+  private readonly searchList = el('div', 'dj-queue');
+  private readonly searchStatus = el('div', 'dj-info', '');
   private raf = 0;
   private visible = false;
   private lastTick = 0;
@@ -174,6 +186,22 @@ export class DjView {
     const stopBtn = Object.assign(el('button', '', 'Stop'), { onclick: () => this.automixCmd('stop') });
     const nextBtn = Object.assign(el('button', '', 'Next'), { onclick: () => this.automixCmd('next') });
     const orderBtn = Object.assign(el('button', '', 'AI order'), { onclick: () => { this.automix.reorder(); this.renderQueue(); } });
+    this.modeSelect.append(
+      Object.assign(el('option'), { value: 'mixxx', textContent: 'Mixxx (sync+fade)' }),
+      Object.assign(el('option'), { value: 'ai', textContent: 'AI (strategie+stili)' }),
+    );
+    this.modeSelect.onchange = () => {
+      this.automix.mode = (this.modeSelect as HTMLSelectElement).value as AutomixMode;
+      this.renderQueue();
+    };
+    const strategies: AutomixStrategy[] = ['smart-ai', 'harmonic', 'energy-buildup', 'energy-wave', 'bpm-ladder'];
+    for (const s of strategies) this.strategySelect.append(Object.assign(el('option'), { value: s, textContent: s }));
+    this.strategySelect.onchange = () => { this.automix.strategy = (this.strategySelect as HTMLSelectElement).value as AutomixStrategy; };
+    const styles: TransitionChoice[] = ['auto', 'smooth', 'bass-swap', 'filter-sweep', 'quick-cut', 'echo-out'];
+    for (const s of styles) this.styleSelect.append(Object.assign(el('option'), { value: s, textContent: s }));
+    this.styleSelect.onchange = () => { this.automix.transitionStyle = (this.styleSelect as HTMLSelectElement).value as TransitionChoice; };
+    const modeRow = el('div', 'dj-row');
+    modeRow.append(labeled('Modo', this.modeSelect), labeled('Strategia', this.strategySelect), labeled('Stile', this.styleSelect));
     autoBtns.append(startBtn, stopBtn, nextBtn, orderBtn, labeled('Fade s', this.fadeInput));
     this.fadeInput.onchange = () => {
       const v = parseFloat(this.fadeInput.value);
@@ -181,7 +209,7 @@ export class DjView {
     };
     this.queueInput.onchange = () => void this.addToQueue();
     const autoPanel = el('div', 'dj-panel');
-    autoPanel.append(autoTitle, labeled('Coda', this.queueInput), this.queueList, autoBtns, this.queueStatus);
+    autoPanel.append(autoTitle, modeRow, labeled('Coda', this.queueInput), this.queueList, autoBtns, this.queueStatus);
 
     // AI generation panel (task 8.x)
     this.genDeck.append(Object.assign(el('option'), { value: 'A', textContent: 'Deck A' }), Object.assign(el('option'), { value: 'B', textContent: 'Deck B' }));
@@ -227,7 +255,20 @@ export class DjView {
     lyriaPanel.append(el('div', 'dj-deck-title', 'Lyria live (zip)'), labeled('Relay', this.lyriaUrlInput), this.lyriaList, lyriaBtns, cfgRow, this.lyriaStatus);
     this.renderLyriaPrompts();
 
-    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest, autoPanel, genPanel, lyriaPanel);
+    // Online search panel (mypromptdj PlatformService: iTunes previews + URL resolve)
+    const searchBtn = Object.assign(el('button', '', 'Cerca'));
+    searchBtn.onclick = () => void this.searchTracks();
+    this.searchInput.onkeydown = (e) => { if (e.key === 'Enter') void this.searchTracks(); };
+    const resolveBtn = Object.assign(el('button', '', 'Risolvi URL'));
+    resolveBtn.onclick = () => void this.resolveUrlTrack();
+    const searchRow = el('div', 'dj-row');
+    searchRow.append(labeled('Cerca', this.searchInput), searchBtn);
+    const urlRow = el('div', 'dj-row');
+    urlRow.append(labeled('URL', this.urlInput), resolveBtn);
+    const searchPanel = el('div', 'dj-panel');
+    searchPanel.append(el('div', 'dj-deck-title', 'Online (preview 30s)'), searchRow, urlRow, this.searchList, this.searchStatus);
+
+    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest, autoPanel, genPanel, lyriaPanel, searchPanel);
 
     this.crossfader.oninput = () => this.engine.setCrossfader(parseFloat(this.crossfader.value));
   }
@@ -291,6 +332,63 @@ export class DjView {
     }
   }
 
+  /** Loads a file into a deck with AI analysis (shared by search/preview/generate). */
+  private async loadFileIntoDeck(file: File, deck: 'A' | 'B'): Promise<void> {
+    const d = deck === 'B' ? this.engine.deckB : this.engine.deckA;
+    await d.loadFile(file);
+    const { meta } = await analyzeTrack(file, d.duration);
+    d.aiMeta = meta;
+    d.bpm = meta.bpm;
+    this.updateSuggestions();
+  }
+
+  private async searchTracks(): Promise<void> {
+    const q = this.searchInput.value.trim();
+    if (!q) return;
+    this.searchStatus.textContent = 'Ricerca…';
+    try {
+      this.renderSearchResults(await itunesSearch(q, 10));
+      this.searchStatus.textContent = '';
+    } catch (e) {
+      this.searchStatus.textContent = `Errore: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  private async resolveUrlTrack(): Promise<void> {
+    const u = this.urlInput.value.trim();
+    if (!u) return;
+    this.searchStatus.textContent = 'Risoluzione URL…';
+    try {
+      this.renderSearchResults([await resolveUrl(u)]);
+      this.searchStatus.textContent = '';
+    } catch (e) {
+      this.searchStatus.textContent = `Errore: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  private renderSearchResults(tracks: PlatformTrack[]): void {
+    this.searchList.textContent = '';
+    if (!tracks.length) this.searchList.append(el('span', 'dj-muted', 'Nessun risultato.'));
+    for (const t of tracks) {
+      const loadA = Object.assign(el('button', '', 'A'));
+      const loadB = Object.assign(el('button', '', 'B'));
+      const run = async (deck: 'A' | 'B') => {
+        try {
+          this.searchStatus.textContent = `Carico ${t.title}…`;
+          await this.loadFileIntoDeck(await previewFile(t), deck);
+          this.searchStatus.textContent = `${t.title} → deck ${deck}`;
+        } catch (e) {
+          this.searchStatus.textContent = `Errore: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      };
+      loadA.onclick = () => void run('A');
+      loadB.onclick = () => void run('B');
+      const row = el('div', 'dj-queue-row');
+      row.append(el('span', '', `${t.artist} — ${t.title} (${t.bpm} BPM)`), loadA, loadB);
+      this.searchList.append(row);
+    }
+  }
+
   /** Prompt entrypoint (UI + remote control, task 6.2). */
   runPromptText(text: string): void {
     const cmd = parseDjPrompt(text);
@@ -320,6 +418,14 @@ export class DjView {
       }
       case 'suggest': this.updateSuggestions(); this.promptOut.textContent = '💡 suggerimenti aggiornati'; break;
       case 'automix': this.automixCmd(cmd.action); this.promptOut.textContent = `🔀 automix ${cmd.action}`; break;
+      case 'weights':
+        this.promptOut.textContent = '⚖️ interpreto…';
+        void interpretPromptForWeights(cmd.text).then(w => {
+          this.promptOut.textContent = w
+            ? `⚖️ pesi: bpm ${w.bpmWeight.toFixed(2)} · armonia ${w.harmonicWeight.toFixed(2)} · ${w.energyFlow}`
+            : '⚖️ proxy non disponibile (serve ai-proxy con GEMINI_API_KEY)';
+        });
+        break;
       default: this.promptOut.textContent = `? comando non capito: "${(cmd as { text: string }).text}"`; break;
     }
   }
@@ -339,9 +445,21 @@ export class DjView {
     const fromB: PlannedTrack[] = [{ name: a.name || 'Deck A', aiMeta: a.aiMeta }];
     const s1 = suggestNext(a.aiMeta, fromA, 1)[0];
     const s2 = suggestNext(b.aiMeta, fromB, 1)[0];
-    this.suggest.textContent = s1 && s2
+    const live = s1 && s2
       ? `Live: A→B ${describeTransition(a.aiMeta, s1.aiMeta)} · B→A ${describeTransition(b.aiMeta, s2.aiMeta)}`
       : 'Suggerimenti: —';
+    // ranked pool from the automix queue (mypromptdj getRankedSuggestions)
+    const active = this.automix.active === 'A' ? a : b;
+    const ranked = getRankedSuggestions(
+      { name: active.name || 'deck', aiMeta: active.aiMeta },
+      this.automix.queue.map(q => ({ name: q.name, aiMeta: q.aiMeta })),
+      3,
+    );
+    const pool = ranked.length
+      ? ` | Coda: ${ranked.map(r => `${r.name} (${(r.score * 100).toFixed(0)} · ${r.harmonicMatch ?? ''})`).join(' · ')}`
+      : '';
+    const w = getAlgorithmWeights();
+    this.suggest.textContent = `${live}${pool} | Pesi bpm ${w.bpmWeight.toFixed(2)}/arm ${w.harmonicWeight.toFixed(2)}/${w.energyFlow}`;
   }
 
   show(on: boolean): void {

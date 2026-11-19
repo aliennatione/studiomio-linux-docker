@@ -1,5 +1,6 @@
 /** Automix engine: AI-ordered queue, crossfade, beat sync, gain normalization (tasks 6.x, 9.x). UI-agnostic: driven by update(dt). */
-import { suggestNext, type PlannedTrack } from './set-planner';
+import type { PlannedTrack } from './set-planner';
+import { evaluateTransition, orderByStrategy, type AutomixStrategy, type TransitionStyle } from './strategies';
 import type { AiMeta } from '../../model/ai-meta';
 
 export interface AutomixTrack {
@@ -21,7 +22,16 @@ export interface AutomixDeck {
   pause(): void;
   stop(): void;
   normalize(): void;
+  setBassDb(db: number): void;
+  setCutoff(hz: number): void;
+  setEchoSend(v: number): void;
+  resetFx(): void;
 }
+
+export type TransitionChoice = TransitionStyle | 'auto';
+
+/** Automix mode: 'mixxx' = simple sync + fade (Mixxx opensource style), 'ai' = strategies + styled transitions. */
+export type AutomixMode = 'mixxx' | 'ai';
 
 export interface AutomixMixer {
   readonly crossfader: number;
@@ -38,10 +48,15 @@ export class Automix {
   running = false;
   notice = '';
   active: 'A' | 'B' = 'A';
+  strategy: AutomixStrategy = 'smart-ai';
+  transitionStyle: TransitionChoice = 'auto';
+  mode: AutomixMode = 'mixxx';
   private fading = false;
   private fadeT = 0;
   private from = 0;
   private to = 1;
+  private style: TransitionStyle = 'smooth';
+  private styleSecs = 8;
   private loading: Promise<void> | null = null;
 
   constructor(
@@ -61,14 +76,16 @@ export class Automix {
     this.queue.length = 0;
   }
 
-  /** AI reorders the queue from the active deck's metadata (task 6.1). */
+  /** AI reorders the queue from the active deck's metadata (task 6.1). No-op in Mixxx mode: manual order. */
   reorder(): void {
+    if (this.mode === 'mixxx') { this.notice = 'Mixxx: ordine manuale (coda invariata)'; return; }
+    if (!this.queue.length) return;
     const cur = this.decks[this.active];
-    if (!cur.loaded) return;
     const meta: AiMeta = (cur as { aiMeta?: AiMeta }).aiMeta ?? { bpm: cur.bpm, key: '', mood: '', genre: '', energy: 0.5 };
-    const ranked = suggestNext(meta, this.queue.map(q => ({ name: q.name, aiMeta: q.aiMeta })), this.queue.length);
+    const seed = { name: `__current__`, aiMeta: meta };
+    const ordered = orderByStrategy(seed, this.queue.map(q => ({ name: q.name, aiMeta: q.aiMeta })), this.strategy);
     const byName = new Map(this.queue.map(q => [q.name, q] as const));
-    this.queue = ranked.map(r => byName.get(r.name)).filter((q): q is AutomixTrack => !!q);
+    this.queue = ordered.map(t => byName.get(t.name)).filter((q): q is AutomixTrack => !!q);
   }
 
   start(): void {
@@ -133,7 +150,18 @@ export class Automix {
         this.to = 1 - this.from;
         this.fadeT = 0;
         this.fading = true;
-        this.notice = `Automix: mix → ${head.name}`;
+        // resolve the transition style: Mixxx = plain fade; AI = chosen or recommended
+        this.style = 'smooth';
+        this.styleSecs = this.crossfadeSec;
+        if (this.mode === 'ai') {
+          const curMeta = this.metaOf(d);
+          const detail = evaluateTransition(curMeta, head.aiMeta);
+          this.style = this.transitionStyle === 'auto' ? detail.recommendedStyle : this.transitionStyle;
+          if (this.transitionStyle === 'auto') this.styleSecs = Math.min(this.crossfadeSec, Math.max(2, detail.recommendedDuration));
+          if (this.style === 'bass-swap') o.setBassDb(-24);
+          if (this.style === 'filter-sweep') o.setCutoff(400);
+        }
+        this.notice = `Automix (${this.mode}): mix → ${head.name}${this.mode === 'ai' && this.style !== 'smooth' ? ` [${this.style}]` : ''}`;
       } else if (remaining <= 0.05 && !o.playing) {
         // track ended without a queued next: manual fallback
         this.notice = 'Automix: brano finito, coda vuota → manuale';
@@ -142,22 +170,47 @@ export class Automix {
       return;
     }
 
-    // fading: linear crossfade over crossfadeSec
-    if (!o.playing) { this.fading = false; return; } // aborted: manual fallback
+    // fading: crossfade over the fade window (Mixxx = linear gains; AI = styled)
+    if (!o.playing && this.style !== 'echo-out') { this.fading = false; d.resetFx(); o.resetFx(); return; } // aborted: manual fallback
     this.fadeT += dt;
-    const k = Math.min(1, this.fadeT / Math.max(0.5, this.crossfadeSec));
-    this.mixer.setCrossfader(this.from + (this.to - this.from) * k);
+    const secs = Math.max(0.5, this.mode === 'mixxx' ? this.crossfadeSec : this.styleSecs);
+    const k = Math.min(1, this.fadeT / secs);
+    if (this.style === 'quick-cut' && k >= 0.5) {
+      this.mixer.setCrossfader(this.to);
+    } else if (this.style === 'echo-out') {
+      const ke = Math.min(1, k * 1.4);
+      this.mixer.setCrossfader(this.from + (this.to - this.from) * ke * ke);
+      d.setEchoSend(0.8 * Math.min(1, k * 3));
+      if (k >= 0.65 && d.playing) d.stop(); // tail rings through the delay
+    } else {
+      this.mixer.setCrossfader(this.from + (this.to - this.from) * k);
+      if (this.style === 'bass-swap') {
+        d.setBassDb(-24 * k);
+        o.setBassDb(-24 * (1 - k));
+      } else if (this.style === 'filter-sweep') {
+        d.setCutoff(20000 * Math.pow(400 / 20000, k));
+        o.setCutoff(400 * Math.pow(20000 / 400, k));
+      }
+    }
     if (k >= 1) {
       this.fading = false;
-      d.stop();
+      if (d.playing) d.stop();
+      d.resetFx();
+      o.resetFx();
+      this.mixer.setCrossfader(this.to);
       this.active = other(this.active);
       this.notice = `Automix: ▶ ${o.name || 'deck ' + this.active}`;
     }
   }
 
+  private metaOf(deck: AutomixDeck): AiMeta {
+    return (deck as { aiMeta?: AiMeta }).aiMeta ?? { bpm: deck.bpm, key: '', mood: '', genre: '', energy: 0.5 };
+  }
+
   status(): string {
     const q = this.queue.length;
-    return `${this.running ? 'ON' : 'OFF'} · attivo ${this.active}${this.fading ? ' (mix…)' : ''} · coda ${q}${this.notice ? ` · ${this.notice}` : ''}`;
+    const cfg = this.mode === 'mixxx' ? 'mixxx' : `${this.strategy}/${this.transitionStyle}`;
+    return `${this.running ? 'ON' : 'OFF'} · ${cfg} · attivo ${this.active}${this.fading ? ' (mix…)' : ''} · coda ${q}${this.notice ? ` · ${this.notice}` : ''}`;
   }
 }
 

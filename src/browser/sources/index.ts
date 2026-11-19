@@ -1,5 +1,6 @@
 /** Online sources entrypoint (tasks 4.1–4.5). */
 export * from './types';
+export * from './platform';
 export * from './self-hosted';
 export * from './streaming';
 export * from './playlists';

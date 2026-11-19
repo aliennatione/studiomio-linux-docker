@@ -142,3 +142,84 @@ async function handleInteractions(req, res) {
     for (const fn of _listeners) fn(req, res);
   });
 }
+
+// ---- mypromptdj endpoints: /analyze-track (base64 audio -> Gemini) + /interpret-prompt (weights)
+const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+
+function jsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', d => { body += d; if (body.length > 64 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); } });
+    req.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+
+async function handleAnalyzeTrack(req, res) {
+  try {
+    const { audioBase64 = '', mimeType = 'audio/mpeg' } = await jsonBody(req);
+    const approxBytes = Math.floor(String(audioBase64).length * 0.75);
+    if (!audioBase64 || approxBytes > MAX_AUDIO_BYTES) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: !audioBase64 ? 'audioBase64 required' : `audio too large (${approxBytes} bytes, max ${MAX_AUDIO_BYTES})` }));
+      return;
+    }
+    if (!KEY) { res.statusCode = 503; res.end(JSON.stringify({ error: 'GEMINI_API_KEY is not configured on the server.' })); return; }
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { inline_data: { mime_type: mimeType, data: audioBase64 } },
+          { text: 'Analizza questa traccia musicale. Rispondi SOLO con JSON {"bpm":number,"key":string Camelot tipo "8A" o "","mood":string,"genre":string,"energy":number 0..1}.' },
+        ] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    });
+    if (!geminiRes.ok) throw new Error(`gemini ${geminiRes.status}`);
+    const data = await geminiRes.json();
+    const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') ?? '{}';
+    let m;
+    try { m = JSON.parse(text); } catch { m = {}; }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      bpm: Number(m.bpm) || 120, key: String(m.key ?? ''), mood: String(m.mood ?? ''),
+      genre: String(m.genre ?? ''), energy: Math.min(1, Math.max(0, Number(m.energy ?? 0.5))),
+    }));
+  } catch (e) { res.statusCode = 400; res.end(JSON.stringify({ error: String(e?.message ?? e) })); }
+}
+
+async function handleInterpretPrompt(req, res) {
+  try {
+    const { prompt = '', currentWeights = {} } = await jsonBody(req);
+    if (!KEY) { res.statusCode = 503; res.end(JSON.stringify({ error: 'GEMINI_API_KEY is not configured on the server.' })); return; }
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text:
+          `Sei un assistente DJ. Dato il prompt utente "${String(prompt).slice(0, 500)}" e i pesi attuali ${JSON.stringify(currentWeights)}, rispondi SOLO con JSON {"bpmWeight":number 0..1,"harmonicWeight":number 0..1,"energyFlow":"buildup"|"cooldown"|"wave"|"constant"}.` }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    });
+    if (!geminiRes.ok) throw new Error(`gemini ${geminiRes.status}`);
+    const data = await geminiRes.json();
+    const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') ?? '{}';
+    let m;
+    try { m = JSON.parse(text); } catch { m = {}; }
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      bpmWeight: Math.min(1, Math.max(0, Number(m.bpmWeight ?? currentWeights.bpmWeight ?? 0.35))),
+      harmonicWeight: Math.min(1, Math.max(0, Number(m.harmonicWeight ?? currentWeights.harmonicWeight ?? 0.5))),
+      energyFlow: ['buildup', 'cooldown', 'wave', 'constant'].includes(m.energyFlow) ? m.energyFlow : (currentWeights.energyFlow ?? 'buildup'),
+    }));
+  } catch (e) { res.statusCode = 400; res.end(JSON.stringify({ error: String(e?.message ?? e) })); }
+}
+
+{
+  const _listeners = server.listeners('request');
+  server.removeAllListeners('request');
+  server.on('request', (req, res) => {
+    if (req.url === '/analyze-track' && req.method === 'POST') { handleAnalyzeTrack(req, res); return; }
+    if (req.url === '/interpret-prompt' && req.method === 'POST') { handleInterpretPrompt(req, res); return; }
+    for (const fn of _listeners) fn(req, res);
+  });
+}

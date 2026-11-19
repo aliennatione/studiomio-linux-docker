@@ -8,6 +8,7 @@ import { AudioClip } from '../model/audio-clip';
 import { MidiClip } from '../model/midi-clip';
 import type { SampleRef } from '../model/sample';
 import { BrowserCatalog, standardSources } from '../browser/catalog';
+import { platformSource } from '../browser/sources/platform';
 import { FsFolder, indexedDbPlaces } from '../browser/fs-folder';
 import type { BrowserItem, BrowserSource, LoadTarget } from '../browser/item';
 import { ControlSurfaces } from '../control/control-surfaces';
@@ -88,9 +89,9 @@ export class App implements Commands, TimelineActions {
   readonly sessionView: SessionView;
   readonly djView: DjView;
   /** The browser on the left: its sources, who loads what is chosen, the view. */
-  readonly catalog = new BrowserCatalog<FsFolder>(standardSources({
+  readonly catalog = new BrowserCatalog<FsFolder>([...standardSources({
     instruments: INSTRUMENT_TYPES, effects: EFFECT_TYPES, user: userPresets, racks: userRacks, factoryRacks: FACTORY_RACKS, project: this.store,
-  }), indexedDbPlaces);
+  }), platformSource()], indexedDbPlaces);
   private readonly loader: BrowserLoader;
   readonly browser: BrowserView;
   private readonly arrangementArea = Object.assign(document.createElement('div'), { className: 'arrangement' });

@@ -198,3 +198,101 @@ describe('lyria models', () => {
     expect(g.parseInteractions(null)).toBe(null);
   });
 });
+
+describe('automix modes', () => {
+  const fakeDeck = (name: string, loaded = true) => {
+    const d = {
+      name, loaded, playing: false, duration: 100, position: 0, bpm: 124,
+      aiMeta: { ...DEFAULT_AI_META, bpm: 124, key: '8A', energy: 0.5 },
+      async loadFile(f: File) { d.name = f.name; d.loaded = true; d.position = 0; },
+      play() { d.playing = true; }, pause() { d.playing = false; }, stop() { d.playing = false; },
+      normalize() {}, setBassDb() {}, setCutoff() {}, setEchoSend() {}, resetFx() {},
+    };
+    return d;
+  };
+  const fakeMixer = () => {
+    const m = { crossfader: 0, setCrossfader(v: number) { m.crossfader = v; }, syncAToB() {}, syncBToA() {} };
+    return m;
+  };
+  const track = (name: string, bpm: number, key: string, energy: number) => ({
+    name, file: new File(['x'], name), aiMeta: { ...DEFAULT_AI_META, bpm, key, energy },
+  });
+
+  it('mixxx mode keeps manual order; ai mode reorders by strategy', async () => {
+    const { Automix } = await import('../src/ui/dj/automix');
+    const mk = () => new Automix({ A: fakeDeck('a'), B: fakeDeck('b') } as never, fakeMixer() as never);
+    const am = mk();
+    am.enqueue([track('t1.mp3', 100, '8A', 0.3), track('t2.mp3', 128, '8A', 0.9), track('t3.mp3', 120, '3B', 0.5)]);
+    am.mode = 'mixxx';
+    am.reorder();
+    expect(am.queue.map(q => q.name)).toEqual(['t1.mp3', 't2.mp3', 't3.mp3']);
+    am.mode = 'ai';
+    am.strategy = 'bpm-ladder';
+    am.reorder();
+    expect(am.queue.map(q => q.name)).toEqual(['t1.mp3', 't3.mp3', 't2.mp3']);
+  });
+
+  it('evaluates transitions with style recommendations', async () => {
+    const { evaluateTransition, orderByStrategy, getRankedSuggestions } = await import('../src/ui/dj/strategies');
+    const club = { ...DEFAULT_AI_META, bpm: 128, key: '8A', energy: 0.9 };
+    const same = { ...DEFAULT_AI_META, bpm: 128, key: '8A', energy: 0.9 };
+    const d = evaluateTransition(club, same);
+    expect(d.score).toBeGreaterThan(80);
+    expect(d.recommendedStyle).toBe('bass-swap');
+    const farMeta = { ...DEFAULT_AI_META, bpm: 100, key: '3B', energy: 0.2 };
+    const far = evaluateTransition(club, farMeta);
+    expect(far.score).toBeLessThan(d.score);
+    expect(['filter-sweep', 'echo-out']).toContain(far.recommendedStyle);
+    const pool = [
+      { name: 'a', aiMeta: same }, { name: 'b', aiMeta: farMeta },
+    ];
+    const ordered = orderByStrategy({ name: 'cur', aiMeta: club }, pool, 'harmonic');
+    expect(ordered[0]?.name).toBe('cur');
+    expect(ordered[1]?.name).toBe('a');
+    const ranked = getRankedSuggestions({ name: 'cur', aiMeta: club }, pool);
+    expect(ranked[0]?.name).toBe('a');
+    expect(ranked[0]?.reason.length).toBeGreaterThan(0);
+  });
+
+  it('toCamelot maps traditional keys', async () => {
+    const { toCamelot, CAMELOT_TO_KEY } = await import('../src/model/ai-meta');
+    expect(toCamelot('Am')).toBe('8A');
+    expect(toCamelot('8a')).toBe('8A');
+    expect(CAMELOT_TO_KEY['8A']).toBe('Am');
+  });
+});
+
+describe('mypromptdj parity', () => {
+  it('prompt weights command parses', async () => {
+    const { parseDjPrompt } = await import('../src/ui/dj/set-planner');
+    expect(parseDjPrompt('pesi più energia')).toEqual({ kind: 'weights', text: 'più energia' });
+  });
+  it('weights normalize within range', async () => {
+    const { normalizeWeights } = await import('../src/ui/dj/ai-weights');
+    expect(normalizeWeights({ bpmWeight: 2, harmonicWeight: -1, energyFlow: 'wave' })).toEqual({
+      bpmWeight: 1, harmonicWeight: 0, energyFlow: 'wave',
+    });
+    const bad = { energyFlow: 'x' } as unknown as Parameters<typeof normalizeWeights>[0];
+    expect(normalizeWeights(bad)).toMatchObject({ energyFlow: 'buildup' });
+  });
+  it('resolveUrl handles direct mp3 without network', async () => {
+    const { resolveUrl } = await import('../src/browser/sources/platform');
+    const t = await resolveUrl('https://example.com/mix/song.mp3?x=1');
+    expect(t.platform).toBe('direct');
+    expect(t.previewUrl).toContain('song.mp3');
+  });
+  it('strategies cover all five modes', async () => {
+    const { orderByStrategy } = await import('../src/ui/dj/strategies');
+    const pool = [
+      { name: 'a', aiMeta: { ...DEFAULT_AI_META, bpm: 100, energy: 0.9 } },
+      { name: 'b', aiMeta: { ...DEFAULT_AI_META, bpm: 130, energy: 0.2 } },
+      { name: 'c', aiMeta: { ...DEFAULT_AI_META, bpm: 120, energy: 0.5 } },
+    ];
+    for (const s of ['harmonic', 'energy-buildup', 'energy-wave', 'bpm-ladder', 'smart-ai'] as const) {
+      const out = orderByStrategy(null, pool, s);
+      expect(out.map(t => t.name).sort()).toEqual(['a', 'b', 'c']);
+    }
+    const ladder = orderByStrategy(null, pool, 'bpm-ladder');
+    expect(ladder.map(t => t.name)).toEqual(['a', 'c', 'b']);
+  });
+});
