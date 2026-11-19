@@ -162,3 +162,24 @@ describe('ai generation', () => {
     expect(parseDjPrompt('automix next')).toEqual({ kind: 'automix', action: 'next' });
   });
 });
+
+describe('lyria session', () => {
+  it('normalizes weighted prompts', async () => {
+    const { normalizePrompts } = await import('../src/ui/dj/lyria-session');
+    expect(normalizePrompts([
+      { text: '  house  ', weight: 1.5 },
+      { text: '', weight: 1 },
+      { text: 'x', weight: 0 },
+    ])).toEqual([{ text: 'house', weight: 1 }]);
+  });
+  it('decodes pcm chunks', async () => {
+    const { decodeChunk } = await import('../src/ui/dj/lyria-session');
+    // stereo frame: L=16384 (0.5), R=-16384 (-0.5)
+    const bytes = new Uint8Array([0x00, 0x40, 0x00, 0xc0]);
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    const [l, r] = decodeChunk(btoa(bin), 2);
+    expect(l[0]).toBeCloseTo(0.5, 5);
+    expect(r[0]).toBeCloseTo(-0.5, 5);
+  });
+});

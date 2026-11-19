@@ -40,3 +40,10 @@ Modalità DJ in studiomio: `Arrangement / Session / DJ` (pulsante `🎧 DJ` nel 
 ## AI audio generation (8.x)
 - Pannello `AI audio`: prompt + secondi + deck → genera clip e la carica nel deck (con analisi AI).
 - `POST /generate { prompt, seconds }` su `ai-proxy` → `{ wavBase64, sampleRate, name }`; con `GENERATE_BACKEND_URL` fa proxy a un backend, altrimenti pad sintetico deterministico. Senza proxy, sintesi offline nel browser (stesso algoritmo, `synthPad`).
+
+## Lyria live (pattern zip remix-promptdj, 8.x)
+- Come negli zip: generazione musicale realtime via **Lyria** (`lyria-realtime-exp`) con weighted prompts, non clip statiche.
+- Relay: `npm run lyria-relay` (`scripts/lyria-relay.mjs`, `LYRIA_PORT` default 8091, `GEMINI_API_KEY` richiesta) — replica `server.ts` degli zip: WebSocket che inoltra `connect_music` / `setWeightedPrompts` / `setMusicGenerationConfig` / `play|pause|stop` a `@google/genai` (`ai.live.music.connect`).
+- Client: `src/ui/dj/lyria-session.ts` — replica il flow di `index.tsx` degli zip: chunk audio base64 → decode PCM → scheduling gapless (`nextStartTime` + buffer 2 s) → `onChunk`/stati/filtri.
+- Pannello `Lyria live (zip)` in DJ view: URL relay, lista prompt + pesi, Play/Pause/Stop, config (BPM/density/brightness), invio prompt, **Cattura 8s → Deck B** (chunk recenti → WAV → deck + analisi AI).
+- Nota licenze: `genaiProxy.ts`/`server.ts` degli zip sono Apache-2.0 (analysis, mai copiati nel repo); il nostro relay/client è scritto ex novo sullo stesso protocollo.

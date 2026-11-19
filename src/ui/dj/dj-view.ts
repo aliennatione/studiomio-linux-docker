@@ -2,6 +2,8 @@ import { DjEngine } from './dj-engine';
 import { analyzeTrack } from './ai-analysis';
 import { generateClip } from './ai-generate';
 import { Automix, type AutomixTrack } from './automix';
+import { LyriaSession, lyriaUrl, setLyriaUrl, type WeightedPrompt } from './lyria-session';
+import { encodeWav } from '../../dsp/codec/wav';
 import { DEFAULT_AI_META } from '../../model/ai-meta';
 import { describeTransition, parseDjPrompt, suggestNext, type PlannedTrack } from './set-planner';
 
@@ -137,6 +139,14 @@ export class DjView {
   private readonly genSecs = Object.assign(el('input'), { type: 'number', min: '2', max: '60', step: '1', value: '8' });
   private readonly genDeck = Object.assign(el('select'), {});
   private readonly genStatus = el('div', 'dj-info', '');
+  private lyria: LyriaSession | null = null;
+  private readonly lyriaUrlInput = Object.assign(el('input'), { type: 'text', value: '' });
+  private readonly lyriaList = el('div', 'dj-queue');
+  private lyriaPrompts: WeightedPrompt[] = [{ text: 'deep house groove', weight: 1 }];
+  private readonly lyriaStatus = el('div', 'dj-info', 'Lyria: non connesso. Avvia `npm run lyria-relay` con GEMINI_API_KEY.');
+  private readonly lyriaBpm = Object.assign(el('input'), { type: 'number', min: '60', max: '200', step: '1', value: '120' });
+  private readonly lyriaDensity = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.01', value: '0.5' });
+  private readonly lyriaBright = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.01', value: '0.5' });
   private raf = 0;
   private visible = false;
   private lastTick = 0;
@@ -181,7 +191,37 @@ export class DjView {
     genRow.append(labeled('Prompt', this.genPrompt), labeled('Sec', this.genSecs), labeled('Deck', this.genDeck), genBtn);
     genPanel.append(el('div', 'dj-deck-title', 'AI audio'), genRow, this.genStatus);
 
-    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest, autoPanel, genPanel);
+    // Lyria live panel (task 8.x, pattern zip remix-promptdj)
+    this.lyriaUrlInput.value = lyriaUrl();
+    const connBtn = Object.assign(el('button', '', 'Connetti'));
+    connBtn.onclick = () => void this.lyriaConnect();
+    const lyPlayBtn = Object.assign(el('button', '', 'Play'));
+    lyPlayBtn.onclick = () => this.lyria?.play();
+    const lyPauseBtn = Object.assign(el('button', '', 'Pause'));
+    lyPauseBtn.onclick = () => this.lyria?.pause();
+    const lyStopBtn = Object.assign(el('button', '', 'Stop'));
+    lyStopBtn.onclick = () => this.lyria?.stop();
+    const addBtn = Object.assign(el('button', '', '+ Prompt'));
+    addBtn.onclick = () => { this.lyriaPrompts.push({ text: '', weight: 0.5 }); this.renderLyriaPrompts(); };
+    const sendBtn = Object.assign(el('button', '', 'Invia prompt'));
+    sendBtn.onclick = () => this.lyria?.setPrompts(this.lyriaPrompts);
+    const capBtn = Object.assign(el('button', '', 'Cattura 8s → Deck B'));
+    capBtn.onclick = () => void this.lyriaCapture();
+    const lyriaBtns = el('div', 'dj-controls');
+    lyriaBtns.append(connBtn, lyPlayBtn, lyPauseBtn, lyStopBtn, addBtn, sendBtn, capBtn);
+    const cfgRow = el('div', 'dj-row');
+    cfgRow.append(labeled('BPM', this.lyriaBpm), labeled('Density', this.lyriaDensity), labeled('Bright', this.lyriaBright));
+    const cfgBtn = Object.assign(el('button', '', 'Config'));
+    cfgBtn.onclick = () => this.lyria?.setConfig({
+      bpm: Math.min(200, Math.max(60, parseInt(this.lyriaBpm.value, 10) || 120)),
+      density: parseFloat(this.lyriaDensity.value), brightness: parseFloat(this.lyriaBright.value),
+    });
+    cfgRow.append(cfgBtn);
+    const lyriaPanel = el('div', 'dj-panel');
+    lyriaPanel.append(el('div', 'dj-deck-title', 'Lyria live (zip)'), labeled('Relay', this.lyriaUrlInput), this.lyriaList, lyriaBtns, cfgRow, this.lyriaStatus);
+    this.renderLyriaPrompts();
+
+    this.element.append(decks, mixer, promptRow, this.promptOut, this.suggest, autoPanel, genPanel, lyriaPanel);
 
     this.crossfader.oninput = () => this.engine.setCrossfader(parseFloat(this.crossfader.value));
   }
@@ -302,6 +342,61 @@ export class DjView {
     this.element.hidden = !on;
     if (on) this.tick();
     else if (this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; }
+  }
+
+  /** Lyria: connect/disconnect the realtime session. */
+  private async lyriaConnect(): Promise<void> {
+    const url = this.lyriaUrlInput.value.trim() || lyriaUrl();
+    setLyriaUrl(url);
+    try {
+      this.lyriaStatus.textContent = 'Lyria: connessione…';
+      const session = new LyriaSession(this.engine.deckA.gain.context, undefined, {
+        onState: s => { this.lyriaStatus.textContent = `Lyria: ${s}`; },
+        onFiltered: (t, r) => { this.lyriaStatus.textContent = `Lyria: prompt filtrato "${t}" (${r})`; },
+        onError: m => { this.lyriaStatus.textContent = `Lyria: ${m}`; },
+      });
+      await session.connect(url);
+      this.lyria = session;
+      session.setPrompts(this.lyriaPrompts);
+      this.lyriaStatus.textContent = 'Lyria: connesso, prompt inviati.';
+    } catch (e) {
+      this.lyriaStatus.textContent = `Lyria: errore (${e instanceof Error ? e.message : String(e)})`;
+    }
+  }
+
+  private renderLyriaPrompts(): void {
+    this.lyriaList.textContent = '';
+    this.lyriaPrompts.forEach((p, i) => {
+      const text = Object.assign(el('input'), { type: 'text', value: p.text, placeholder: 'prompt' });
+      const weight = Object.assign(el('input'), { type: 'range', min: '0', max: '1', step: '0.05', value: String(p.weight) });
+      text.onchange = () => { this.lyriaPrompts[i] = { text: text.value, weight: this.lyriaPrompts[i].weight }; };
+      weight.oninput = () => { this.lyriaPrompts[i] = { text: this.lyriaPrompts[i].text, weight: parseFloat(weight.value) }; };
+      const rm = Object.assign(el('button', '', '✕'), {
+        onclick: () => { this.lyriaPrompts.splice(i, 1); this.renderLyriaPrompts(); },
+      });
+      const row = el('div', 'dj-queue-row');
+      row.append(text, weight, rm);
+      this.lyriaList.append(row);
+    });
+  }
+
+  /** Records recent Lyria audio into Deck B as a file (task 8.2). */
+  private async lyriaCapture(seconds = 8): Promise<void> {
+    const buf = this.lyria?.capture(seconds);
+    if (!buf) { this.lyriaStatus.textContent = 'Lyria: niente da catturare (avvia il play prima).'; return; }
+    try {
+      const channels = [buf.getChannelData(0).slice(), buf.numberOfChannels > 1 ? buf.getChannelData(1).slice() : buf.getChannelData(0).slice()];
+      const wav = encodeWav(channels, buf.sampleRate, 16);
+      const file = new File([wav], `lyria-${Date.now()}.wav`, { type: 'audio/wav' });
+      await this.engine.deckB.loadFile(file);
+      const { meta } = await analyzeTrack(file, this.engine.deckB.duration);
+      this.engine.deckB.aiMeta = meta;
+      this.engine.deckB.bpm = meta.bpm;
+      this.lyriaStatus.textContent = `Lyria: catturati ${seconds}s → Deck B.`;
+      this.updateSuggestions();
+    } catch (e) {
+      this.lyriaStatus.textContent = `Lyria: errore cattura (${e instanceof Error ? e.message : String(e)})`;
+    }
   }
 
   private tick = (now: number = 0): void => {
