@@ -153,7 +153,7 @@ describe('ai generation', () => {
     expect(l.length).toBe(8000);
     expect(r.length).toBe(8000);
     const clip = await g.generateClip({ prompt: 'test pad', seconds: 1 });
-    expect(clip.name.endsWith('.wav')).toBe(true);
+    expect(clip.file.name.endsWith('.wav')).toBe(true);
   });
   it('parses automix prompt commands', async () => {
     const { parseDjPrompt } = await import('../src/ui/dj/set-planner');
@@ -181,5 +181,20 @@ describe('lyria session', () => {
     const [l, r] = decodeChunk(btoa(bin), 2);
     expect(l[0]).toBeCloseTo(0.5, 5);
     expect(r[0]).toBeCloseTo(-0.5, 5);
+  });
+});
+
+describe('lyria models', () => {
+  it('validates model ids and parses interactions responses', async () => {
+    const g = await import('../src/ui/dj/ai-generate');
+    expect(g.isLyriaModel('lyria-3.5')).toBe(true);
+    expect(g.isLyriaModel('lyria-3-clip-preview')).toBe(true);
+    expect(g.isLyriaModel('lyria-realtime-exp')).toBe(false);
+    expect(g.isLyriaModel('pad')).toBe(false);
+    expect(g.parseInteractions({ audioBase64: 'AAA=', mimeType: 'audio/mp3', lyrics: 'la' })).toEqual({
+      audioBase64: 'AAA=', mimeType: 'audio/mp3', lyrics: 'la',
+    });
+    expect(g.parseInteractions({})).toBe(null);
+    expect(g.parseInteractions(null)).toBe(null);
   });
 });

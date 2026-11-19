@@ -105,3 +105,40 @@ server.on('request', (req, res) => {
   if (req.url === '/generate' && req.method === 'POST') { handleGenerate(req, res); return; }
   for (const fn of _listeners) fn(req, res);
 });
+
+// ---- Lyria 3.5 / 3 Clip via Interactions API (models: lyria-3.5, lyria-3-clip-preview)
+// POST /interactions { prompt, model } -> { audioBase64 (mp3), mimeType, lyrics, name }
+// Requires GEMINI_API_KEY; without key (or unknown model) returns 503/400.
+const LYRIA_MODELS = ['lyria-3.5', 'lyria-3-clip-preview'];
+
+async function handleInteractions(req, res) {
+  let body = ''; req.on('data', d => body += d); req.on('end', async () => {
+    try {
+      const { prompt = '', model = 'lyria-3-clip-preview' } = JSON.parse(body);
+      if (!LYRIA_MODELS.includes(model)) { res.statusCode = 400; res.end(JSON.stringify({ error: `Unknown model: ${model}. Use: ${LYRIA_MODELS.join(', ')}` })); return; }
+      if (!KEY) { res.statusCode = 503; res.end(JSON.stringify({ error: 'GEMINI_API_KEY is not configured on the server.' })); return; }
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: KEY });
+      const interaction = await ai.interactions.create({ model, input: String(prompt) });
+      const audio = interaction.output_audio;
+      const data = audio?.data;
+      if (!data) { res.statusCode = 502; res.end(JSON.stringify({ error: 'No audio in interaction response.' })); return; }
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        audioBase64: data,
+        mimeType: audio?.mimeType || 'audio/mp3',
+        lyrics: interaction.output_text || '',
+        name: `${String(prompt).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'lyria'}-${model}.mp3`,
+      }));
+    } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: String(e?.message ?? e) })); }
+  });
+}
+
+{
+  const _listeners = server.listeners('request');
+  server.removeAllListeners('request');
+  server.on('request', (req, res) => {
+    if (req.url === '/interactions' && req.method === 'POST') { handleInteractions(req, res); return; }
+    for (const fn of _listeners) fn(req, res);
+  });
+}

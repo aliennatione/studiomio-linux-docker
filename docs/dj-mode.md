@@ -47,3 +47,8 @@ Modalità DJ in studiomio: `Arrangement / Session / DJ` (pulsante `🎧 DJ` nel 
 - Client: `src/ui/dj/lyria-session.ts` — replica il flow di `index.tsx` degli zip: chunk audio base64 → decode PCM → scheduling gapless (`nextStartTime` + buffer 2 s) → `onChunk`/stati/filtri.
 - Pannello `Lyria live (zip)` in DJ view: URL relay, lista prompt + pesi, Play/Pause/Stop, config (BPM/density/brightness), invio prompt, **Cattura 8s → Deck B** (chunk recenti → WAV → deck + analisi AI).
 - Nota licenze: `genaiProxy.ts`/`server.ts` degli zip sono Apache-2.0 (analysis, mai copiati nel repo); il nostro relay/client è scritto ex novo sullo stesso protocollo.
+
+## Modelli recenti (Lyria 3.5 / 3 Clip)
+- Verificati su https://ai.google.dev/gemini-api/docs/music-generation : realtime resta `lyria-realtime-exp`; i nuovi modelli sono **Lyria 3.5** (`lyria-3.5`, brani interi di un paio di minuti, 44.1 kHz stereo MP3) e **Lyria 3 Clip** (`lyria-3-clip-preview`, clip 30 s) via **Interactions API** (`client.interactions.create({model, input})` → `output_audio.data` + `output_text` con testo/struttura).
+- `POST /interactions` in `ai-proxy` (allowlist modelli, `GEMINI_API_KEY` richiesta) + client `generateLyriaClip`/`parseInteractions`/`isLyriaModel` in `ai-generate.ts`.
+- Pannello AI audio: selettore modello (Pad offline / Lyria 3 Clip / Lyria 3.5); il testo generato è mostrato nello stato; senza proxy/chiave si usa il pad offline.

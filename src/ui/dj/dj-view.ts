@@ -1,6 +1,6 @@
 import { DjEngine } from './dj-engine';
 import { analyzeTrack } from './ai-analysis';
-import { generateClip } from './ai-generate';
+import { generateClip, type LyriaModel } from './ai-generate';
 import { Automix, type AutomixTrack } from './automix';
 import { LyriaSession, lyriaUrl, setLyriaUrl, type WeightedPrompt } from './lyria-session';
 import { encodeWav } from '../../dsp/codec/wav';
@@ -138,6 +138,7 @@ export class DjView {
   private readonly genPrompt = Object.assign(el('input'), { type: 'text', placeholder: 'Descrivi il clip (es. deep house pad 122 BPM)' });
   private readonly genSecs = Object.assign(el('input'), { type: 'number', min: '2', max: '60', step: '1', value: '8' });
   private readonly genDeck = Object.assign(el('select'), {});
+  private readonly genModel = Object.assign(el('select'), {});
   private readonly genStatus = el('div', 'dj-info', '');
   private lyria: LyriaSession | null = null;
   private readonly lyriaUrlInput = Object.assign(el('input'), { type: 'text', value: '' });
@@ -185,10 +186,15 @@ export class DjView {
     // AI generation panel (task 8.x)
     this.genDeck.append(Object.assign(el('option'), { value: 'A', textContent: 'Deck A' }), Object.assign(el('option'), { value: 'B', textContent: 'Deck B' }));
     (this.genDeck as HTMLSelectElement).value = 'B';
+    this.genModel.append(
+      Object.assign(el('option'), { value: 'pad', textContent: 'Pad offline' }),
+      Object.assign(el('option'), { value: 'lyria-3-clip-preview', textContent: 'Lyria 3 Clip (30s)' }),
+      Object.assign(el('option'), { value: 'lyria-3.5', textContent: 'Lyria 3.5 (brano)' }),
+    );
     const genBtn = Object.assign(el('button', '', 'Genera'), { onclick: () => void this.generate() });
     const genPanel = el('div', 'dj-panel');
     const genRow = el('div', 'dj-row');
-    genRow.append(labeled('Prompt', this.genPrompt), labeled('Sec', this.genSecs), labeled('Deck', this.genDeck), genBtn);
+    genRow.append(labeled('Prompt', this.genPrompt), labeled('Modello', this.genModel), labeled('Sec', this.genSecs), labeled('Deck', this.genDeck), genBtn);
     genPanel.append(el('div', 'dj-deck-title', 'AI audio'), genRow, this.genStatus);
 
     // Lyria live panel (task 8.x, pattern zip remix-promptdj)
@@ -269,15 +275,16 @@ export class DjView {
     const prompt = this.genPrompt.value.trim();
     if (!prompt) { this.genStatus.textContent = 'Scrivi un prompt prima.'; return; }
     const secs = Math.min(60, Math.max(2, parseInt(this.genSecs.value, 10) || 8));
+    const model = (this.genModel as HTMLSelectElement).value as 'pad' | LyriaModel;
     this.genStatus.textContent = 'Generazione…';
     try {
-      const file = await generateClip({ prompt, seconds: secs });
+      const { file, lyrics } = await generateClip({ prompt, seconds: secs, model });
       const deck = (this.genDeck as HTMLSelectElement).value === 'B' ? this.engine.deckB : this.engine.deckA;
       await deck.loadFile(file);
       const { meta } = await analyzeTrack(file, deck.duration);
       deck.aiMeta = meta;
       deck.bpm = meta.bpm;
-      this.genStatus.textContent = `Pronto: ${file.name} → deck ${(this.genDeck as HTMLSelectElement).value}`;
+      this.genStatus.textContent = `Pronto: ${file.name} → deck ${(this.genDeck as HTMLSelectElement).value}${lyrics ? ` · testo: ${lyrics.slice(0, 120)}` : ''}`;
       this.updateSuggestions();
     } catch (e) {
       this.genStatus.textContent = `Errore: ${e instanceof Error ? e.message : String(e)}`;
