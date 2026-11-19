@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["tests/wasm.test.ts", "tests/dsp.perf.ts"]
+}
