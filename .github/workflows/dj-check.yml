@@ -16,7 +16,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit --skipLibCheck --project tsconfig.ci.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@wasm-pack
+      - run: npm run wasm
+      - run: npm run wasm:test
+      - run: npx tsc --noEmit
       - run: npx vitest run tests/dj.test.ts
       - run: npx vite build
         env:
